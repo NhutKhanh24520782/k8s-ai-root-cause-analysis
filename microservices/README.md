@@ -1,7 +1,4 @@
-# services/
-
-> **Status:** No microservice source code has been implemented yet.  
-> This README documents what will be built and why.
+# microservices/
 
 ---
 
@@ -28,7 +25,7 @@ The application is intentionally minimal. Its primary function within this proje
 ## Service Communication
 
 ```
-Internet → ALB (Ingress) → API Gateway → Order Service
+Internet → ALB (Ingress) → API Gateway → Order Service   → POSTGRES
                                        → Payment Service
 ```
 
@@ -37,6 +34,7 @@ Internet → ALB (Ingress) → API Gateway → Order Service
 - There is no service mesh in the MVP.
 
 ---
+
 
 ## Required Application Metrics
 
@@ -59,7 +57,7 @@ When implementing, use the [Prometheus Python client](https://github.com/prometh
 When Dockerfiles are added:
 
 - Each service will have its own `Dockerfile` inside its subdirectory.
-- Base images must be official, minimal images (e.g., `python:3.12-slim`).
+- Base images must be official, minimal images (e.g., `python:3.12-slim` , `postgres:16-alpine`).
 - Images will be tagged with the Git short SHA and pushed to Amazon ECR.
 - Multi-stage builds should be used to exclude development dependencies from the runtime image.
 
@@ -70,7 +68,7 @@ When Dockerfiles are added:
 The following structure will be created when implementation begins. It is **not created now** because no source files exist yet.
 
 ```
-services/
+microservices/
 ├── api-gateway/
 │   ├── Dockerfile
 │   ├── main.py
