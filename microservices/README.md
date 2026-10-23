@@ -59,7 +59,7 @@ When implementing, use the [Prometheus Python client](https://github.com/prometh
 When Dockerfiles are added:
 
 - Each service will have its own `Dockerfile` inside its subdirectory.
-- Base images must be official, minimal images (e.g., `python:3.11-slim`).
+- Base images must be official, minimal images (e.g., `python:3.12-slim`).
 - Images will be tagged with the Git short SHA and pushed to Amazon ECR.
 - Multi-stage builds should be used to exclude development dependencies from the runtime image.
 
