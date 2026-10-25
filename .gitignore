@@ -164,3 +164,5 @@ logs/
 *.tmp
 *.temp
 .cache/
+
+*credentials*
