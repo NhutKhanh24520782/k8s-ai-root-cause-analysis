@@ -165,4 +165,4 @@ logs/
 *.temp
 .cache/
 
-*credential*
+*self*
