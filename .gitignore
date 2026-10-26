@@ -168,5 +168,4 @@ logs/
 *.temp
 .cache/
 
-.credentials.txt
-*key*
+*self*
