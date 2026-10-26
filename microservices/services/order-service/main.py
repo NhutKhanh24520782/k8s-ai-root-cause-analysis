@@ -1,6 +1,7 @@
 import os
 import time
 from contextlib import asynccontextmanager
+import uuid
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
                     text("""
                         CREATE TABLE IF NOT EXISTS orders (
                             id SERIAL PRIMARY KEY,
+                            order_id UUID NOT NULL UNIQUE,
                             item_name VARCHAR(200) NOT NULL,
                             quantity INTEGER NOT NULL
                                 CHECK (quantity > 0),
@@ -136,6 +138,26 @@ async def prometheus_middleware(request: Request, call_next):
 def health():
     return {"status": "ok"}
 
+@app.get("/health/ready")
+def readiness():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+
+        return {
+            "status": "ok",
+            "database": "connected",
+        }
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "error",
+                "database": "disconnected",
+            },
+        )
+
 
 @app.get("/metrics")
 def metrics():
@@ -175,16 +197,23 @@ def list_orders():
 
 @app.post("/orders", status_code=201)
 def create_order(order: OrderCreate):
+    order_id = uuid.uuid4()
     try:
         with engine.begin() as connection:
             row = connection.execute(
                 text("""
-                    INSERT INTO orders (item_name, quantity)
-                    VALUES (:item_name, :quantity)
+                    INSERT INTO orders (order_id, item_name, quantity)
+                    VALUES (:order_id, :item_name, :quantity)
                     RETURNING *
                 """),
-                order.model_dump(),
+                {**order.model_dump(), "order_id": str(order_id)},
             ).fetchone()
+
+            if row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Order not found",
+                )
 
         return serialize_order(row)
 
@@ -196,15 +225,15 @@ def create_order(order: OrderCreate):
 
 
 @app.get("/orders/{order_id}")
-def get_order(order_id: int):
+def get_order(order_id: uuid.UUID):
     try:
         with engine.connect() as connection:
             row = connection.execute(
                 text("""
                     SELECT * FROM orders
-                    WHERE id = :id
+                    WHERE order_id = :order_id
                 """),
-                {"id": order_id},
+                {"order_id": order_id},
             ).fetchone()
 
         if row is None:
@@ -224,7 +253,7 @@ def get_order(order_id: int):
 
 @app.put("/orders/{order_id}")
 def update_order(
-    order_id: int,
+    order_id: uuid.UUID,
     order: OrderUpdate,
 ):
     values = {
@@ -242,7 +271,7 @@ def update_order(
     assignments = ", ".join(
         f"{key} = :{key}" for key in values
     )
-    values["id"] = order_id
+    values["order_id"] = order_id
 
     try:
         with engine.begin() as connection:
@@ -250,7 +279,7 @@ def update_order(
                 text(f"""
                     UPDATE orders
                     SET {assignments}
-                    WHERE id = :id
+                    WHERE order_id = :order_id
                     RETURNING *
                 """),
                 values,
@@ -272,15 +301,15 @@ def update_order(
 
 
 @app.delete("/orders/{order_id}", status_code=204)
-def delete_order(order_id: int):
+def delete_order(order_id: uuid.UUID):
     try:
         with engine.begin() as connection:
             result = connection.execute(
                 text("""
                     DELETE FROM orders
-                    WHERE id = :id
+                    WHERE order_id = :order_id
                 """),
-                {"id": order_id},
+                {"order_id": order_id},
             )
 
         if result.rowcount == 0:

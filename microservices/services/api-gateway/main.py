@@ -154,11 +154,11 @@ async def orders(request: Request, path: str = ""):
 
 @app.api_route(
     "/payments",
-    methods=["POST"],
+    methods=["POST","GET"],
 )
 @app.api_route(
     "/payments/{path:path}",
-    methods=["POST"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
 )
 async def payments(request: Request, path: str = ""):
     suffix = f"/{path}" if path else ""

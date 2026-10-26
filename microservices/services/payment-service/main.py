@@ -1,9 +1,12 @@
 
+from asyncio.log import logger
 import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 from decimal import Decimal
+
+import httpx
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -55,10 +58,7 @@ PAYMENT_ATTEMPTS = Counter(
     "Total payment attempts",
 )
 
-PAYMENT_FAILURES = Counter(
-    "payment_failures_total",
-    "Total failed payment attempts",
-)
+
 
 # ==========================================
 # Application configuration
@@ -67,6 +67,11 @@ PAYMENT_FAILURES = Counter(
 SIMULATE_FAILURE = (
     os.getenv("SIMULATE_PAYMENT_FAILURE", "false").lower()
     in {"true", "1", "yes"}
+)
+
+ORDER_SERVICE_URL = os.getenv(
+    "ORDER_SERVICE_URL",
+    "http://order-service:8001",
 )
 
 
@@ -83,7 +88,7 @@ async def lifespan(app: FastAPI):
                         CREATE TABLE IF NOT EXISTS payments (
                             id SERIAL PRIMARY KEY,
                             payment_id UUID NOT NULL UNIQUE,
-                            order_id INTEGER NOT NULL CHECK (order_id > 0),
+                            order_id UUID NOT NULL,
                             amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
                             currency VARCHAR(3) NOT NULL,
                             status VARCHAR(20) NOT NULL,
@@ -120,9 +125,28 @@ app = FastAPI(
 # ==========================================
 
 class PaymentRequest(BaseModel):
-    order_id: int = Field(gt=0)
+    order_id: uuid.UUID
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
     currency: str = Field(default="USD", min_length=3, max_length=3)
+
+class PaymentUpdate(BaseModel):
+    order_id: uuid.UUID
+    amount: Decimal | None = Field(
+        default=None,
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+    )
+    currency: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        pattern=r"^[A-Za-z]{3}$",
+    )
+    status: str | None = Field(
+        default=None,
+        pattern=r"^(pending|succeeded|failed|cancelled)$",
+    )
 
 
 # ==========================================
@@ -203,14 +227,93 @@ def metrics():
         media_type=CONTENT_TYPE_LATEST,
     )
 
+def serialize_payment(row):
+    result = dict(row._mapping)
+
+    if result.get("created_at"):
+        result["created_at"] = (
+            result["created_at"].isoformat()
+        )
+
+    return result
+
 
 # ==========================================
 # Payment endpoints
 # ==========================================
 
+async def validate_order(order_id: uuid.UUID) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{ORDER_SERVICE_URL.rstrip('/')}/orders/{order_id}"
+            )
+
+        if response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to validate order",
+            )
+
+    except httpx.RequestError:
+        raise HTTPException(
+            status_code=502,
+            detail="Order service unavailable",
+        )
+
 @app.post("/payments", status_code=201)
-def create_payment(payment: PaymentRequest):
+async def create_payment(payment: PaymentRequest):
     PAYMENT_ATTEMPTS.inc()
+    await validate_order(payment.order_id)
+    payment_id = uuid.uuid4()
+    status = "failed" if SIMULATE_FAILURE else "succeeded"
+
+    try:
+        with engine.begin() as connection:
+            row = connection.execute(
+                text("""
+                    INSERT INTO payments (
+                        payment_id,
+                        order_id,
+                        amount,
+                        currency,
+                        status
+                    )
+                    VALUES (
+                        :payment_id,
+                        :order_id,
+                        :amount,
+                        :currency,
+                        :status
+                    )
+                    RETURNING *
+                """),
+                {
+                    **payment.model_dump(), "payment_id": str(payment_id), "status": status,
+                },
+            ).fetchone()
+
+        return serialize_payment(row)
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Payment database unavailable",
+        )
+
+
+@app.post("/payments", status_code=201)
+async def create_payment(payment: PaymentRequest):
+    PAYMENT_ATTEMPTS.inc()
+
+    # Xác minh đơn hàng trước khi tạo payment.
+    await validate_order(payment.order_id)
 
     payment_id = uuid.uuid4()
     status = "failed" if SIMULATE_FAILURE else "succeeded"
@@ -233,47 +336,22 @@ def create_payment(payment: PaymentRequest):
                         :currency,
                         :status
                     )
-                    RETURNING
-                        id,
-                        payment_id,
-                        order_id,
-                        amount,
-                        currency,
-                        status,
-                        created_at
+                    RETURNING *
                 """),
                 {
-                    "payment_id": payment_id,
-                    "order_id": payment.order_id,
-                    "amount": payment.amount,
-                    "currency": payment.currency.upper(),
+                    **payment.model_dump(),
+                    "payment_id": str(payment_id),
+                    "order_id": str(payment.order_id),
                     "status": status,
+                    "currency": payment.currency.upper(),
                 },
             ).fetchone()
 
-        result = dict(row._mapping)
-        result["payment_id"] = str(result["payment_id"])
-        result["amount"] = str(result["amount"])
-        result["created_at"] = result["created_at"].isoformat()
-
-        if SIMULATE_FAILURE:
-            PAYMENT_FAILURES.inc()
-
-            # The failed attempt remains recorded in the database.
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "Simulated payment failure",
-                    "payment": result,
-                },
-            )
-
-        return result
-
-    except HTTPException:
-        raise
+        return serialize_payment(row)
 
     except SQLAlchemyError:
+        logger.exception("Failed to create payment")
+
         raise HTTPException(
             status_code=503,
             detail="Payment database unavailable",
@@ -292,16 +370,7 @@ def list_payments():
                 """)
             ).fetchall()
 
-        results = []
-
-        for row in rows:
-            item = dict(row._mapping)
-            item["payment_id"] = str(item["payment_id"])
-            item["amount"] = str(item["amount"])
-            item["created_at"] = item["created_at"].isoformat()
-            results.append(item)
-
-        return results
+        return [serialize_payment(row) for row in rows]
 
     except SQLAlchemyError:
         raise HTTPException(
@@ -323,21 +392,43 @@ def get_payment(payment_id: uuid.UUID):
                 {"payment_id": payment_id},
             ).fetchone()
 
-        if row is None:
+            if row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Payment not found",
+                )
+
+        return serialize_payment(row)
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Payment database unavailable",
+        )
+
+@app.delete(
+    "/payments/{payment_id}",
+    status_code=204,
+)
+def delete_payment(payment_id: uuid.UUID):
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("""
+                    DELETE FROM payments
+                    WHERE payment_id = :payment_id
+                """),
+                {"payment_id": payment_id},
+            )
+
+        if result.rowcount == 0:
             raise HTTPException(
                 status_code=404,
                 detail="Payment not found",
             )
 
-        result = dict(row._mapping)
-        result["payment_id"] = str(result["payment_id"])
-        result["amount"] = str(result["amount"])
-        result["created_at"] = result["created_at"].isoformat()
+        return Response(status_code=204)
 
-        return result
-
-    except HTTPException:
-        raise
 
     except SQLAlchemyError:
         raise HTTPException(
