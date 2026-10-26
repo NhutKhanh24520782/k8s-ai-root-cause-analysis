@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg://app:app_password@postgres:5432/orders_db",
+    "postgresql+psycopg://order_user:${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD}@order-db:5432/orders_db",
 )
 
 engine = create_engine(
