@@ -1,0 +1,14 @@
+# =============================================================================
+# Bootstrap tfvars example
+# =============================================================================
+# Copy this file to terraform.tfvars (excluded from Git) and fill in the values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+# =============================================================================
+
+project_name = "ai-rca"
+aws_region   = "ap-southeast-1"
+
+# Choose a globally-unique name. Suggestion: ai-rca-tfstate-<your-initials><4-digits>
+# Example: ai-rca-tfstate-nkt7291
+bucket_name = "ai-rca-tfstate-changeme"

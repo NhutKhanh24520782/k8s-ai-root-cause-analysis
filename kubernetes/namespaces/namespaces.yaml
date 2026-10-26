@@ -1,0 +1,45 @@
+# =============================================================================
+# Kubernetes Namespaces — AI Root Cause Analysis Project
+# Step A1.3 — Namespace & RBAC cơ bản
+# =============================================================================
+# Three namespaces isolate the workloads by concern:
+#   • microservices — API Gateway, Order Service, Payment Service
+#   • monitoring    — Prometheus, Grafana (kube-prometheus-stack)
+#   • ml-stack      — MLflow Tracking Server, RCA FastAPI
+# =============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: microservices
+  labels:
+    project: ai-rca
+    env: dev
+    managed-by: kubectl
+  annotations:
+    description: "Microservices workloads: API Gateway, Order Service, Payment Service"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    project: ai-rca
+    env: dev
+    managed-by: kubectl
+  annotations:
+    description: "Observability stack: Prometheus and Grafana (kube-prometheus-stack)"
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-stack
+  labels:
+    project: ai-rca
+    env: dev
+    managed-by: kubectl
+  annotations:
+    description: "ML workloads: MLflow Tracking Server and RCA FastAPI prediction service"

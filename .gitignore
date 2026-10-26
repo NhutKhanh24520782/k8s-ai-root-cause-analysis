@@ -9,6 +9,9 @@
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
+# Allow the bootstrap local state to be committed (it contains no secrets)
+# Teammates need it to know bootstrap was already run
+!terraform/bootstrap/terraform.tfstate
 crash.log
 crash.*.log
 # Sensitive variable files — use .tfvars.example instead

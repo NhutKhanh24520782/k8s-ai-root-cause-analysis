@@ -1,7 +1,7 @@
 # kubernetes/
 
-> **Status:** No Kubernetes manifests have been created yet.  
-> This README documents what will be built and why.
+> **Status:** 🚧 In progress — Step A1.3 (Namespace & RBAC) ✅ complete.  
+> Deployment and Service manifests will follow in Phase 5.
 
 ---
 
@@ -70,17 +70,17 @@ kubectl get ingress -n rca-system
 
 ---
 
-## Planned Subdirectory Structure
-
-The following structure will be created when implementation begins. It is **not created now** because no manifest files exist yet.
+## Subdirectory Structure
 
 ```
 kubernetes/
-├── namespaces/
-├── api-gateway/
-├── order-service/
-├── payment-service/
-└── rca-api/
+├── namespaces/                  ← ✅ Step A1.3 — Namespace definitions
+│   ├── namespaces.yaml          ← microservices, monitoring, ml-stack
+│   └── README.md
+├── api-gateway/                 ← ⏳ Phase 5 — Deployment, Service, Ingress
+├── order-service/               ← ⏳ Phase 5 — Deployment, Service
+├── payment-service/             ← ⏳ Phase 5 — Deployment, Service
+└── rca-api/                     ← ⏳ Phase 10 — FastAPI prediction service
 ```
 
 Each subdirectory will contain the Deployment, Service, ConfigMap, and (where needed) Ingress manifests for that workload.
@@ -89,4 +89,16 @@ Each subdirectory will contain the Deployment, Service, ConfigMap, and (where ne
 
 ## Current Implementation Status
 
-No manifests exist yet. Implementation begins in **Phase 5** of the project roadmap (see root `README.md`).
+| Step | Resource | Status |
+|------|----------|--------|
+| A1.3 | `Namespace` — microservices, monitoring, ml-stack | ✅ Complete |
+| Phase 5 | Deployments, Services, ConfigMaps, Ingress | ⏳ Not started |
+| Phase 6 | kube-prometheus-stack (Helm) | ⏳ Not started |
+| Phase 10 | RCA FastAPI Deployment | ⏳ Not started |
+
+Apply namespaces:
+
+```bash
+kubectl apply -f kubernetes/namespaces/namespaces.yaml
+kubectl get namespaces -l project=ai-rca
+```
