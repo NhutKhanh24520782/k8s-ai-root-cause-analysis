@@ -1,0 +1,82 @@
+# monitoring/helm-values/kube-prometheus-stack-values.yaml
+
+# Grafana
+grafana:
+  enabled: true
+  adminUser: admin
+
+# Prometheus
+prometheus:
+  enabled: true
+  prometheusSpec:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+
+    # Giới hạn lưu trữ dữ liệu metrics cho môi trường lab
+    retention: 7d
+
+    # Phù hợp cho lab nhỏ; cần điều chỉnh theo tải thực tế
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  # Tạo ServiceMonitor cho các microservices
+  additionalServiceMonitors:
+  - name: api-gateway
+    additionalLabels:
+      release: kube-prometheus-stack
+    selector:
+      matchLabels:
+        app: api-gateway
+    namespaceSelector:
+      matchNames:
+        - microservices
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+        scrapeTimeout: 10s
+
+  - name: order-service
+    additionalLabels:
+      release: kube-prometheus-stack
+    selector:
+      matchLabels:
+        app: order-service
+    namespaceSelector:
+      matchNames:
+        - microservices
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+        scrapeTimeout: 10s
+
+  - name: payment-service
+    additionalLabels:
+      release: kube-prometheus-stack
+    selector:
+      matchLabels:
+        app: payment-service
+    namespaceSelector:
+      matchNames:
+        - microservices
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+        scrapeTimeout: 10s
+
+# Alertmanager
+alertmanager:
+  enabled: true
+
+# Thu thập metrics từ Kubernetes resources
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
