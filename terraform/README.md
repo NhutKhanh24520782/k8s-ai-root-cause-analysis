@@ -119,7 +119,7 @@ Generic, reusable module that creates an IAM role with an OIDC trust policy scop
 
 Choose **one** of the following options. All three produce the same result.
 
-**Option A — Terraform bootstrap** *(recommended — fully declarative)*
+** Terraform bootstrap** *(recommended — fully declarative)*
 ```bash
 cd terraform/bootstrap/
 cp terraform.tfvars.example terraform.tfvars
@@ -135,18 +135,6 @@ git commit -m "chore(terraform): bootstrap S3 state bucket"
 cd ..
 ```
 
-**Option B — Bash script** *(Linux/macOS)*
-```bash
-chmod +x scripts/bootstrap-state-bucket.sh
-./scripts/bootstrap-state-bucket.sh ai-rca-tfstate-<suffix>
-```
-
-**Option C — PowerShell script** *(Windows)*
-```powershell
-.\scripts\bootstrap-state-bucket.ps1 -BucketName "ai-rca-tfstate-<suffix>"
-```
-
-> See [bootstrap/README.md](./bootstrap/README.md) for full details on each option.
 
 ### Step 2 — Update `backend.tf`
 
