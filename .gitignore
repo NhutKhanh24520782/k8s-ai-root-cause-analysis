@@ -167,7 +167,6 @@ logs/
 *.tmp
 *.temp
 .cache/
+*credential*
 
 *self*
-
-*credential*
