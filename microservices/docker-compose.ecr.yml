@@ -1,0 +1,43 @@
+services:
+  order-service:
+    build:
+      context: ./services/order-service
+    image: ${ECR_REGISTRY}/order-service:1.0.1
+    environment:
+      DATABASE_URL: postgresql+psycopg://order_user:${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD}@order-db:5432/orders_db
+    ports:
+      - "8001:8001"
+    networks:
+      - backend
+
+  payment-service:
+    build:
+      context: ./services/payment-service
+    image: ${ECR_REGISTRY}/payment-service:1.0.0
+    environment:
+      DATABASE_URL: postgresql+psycopg://payment_user:${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD}@payment-db:5432/payment_db
+    ports:
+      - "8002:8002"
+    networks:
+      - backend
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    image: ${ECR_REGISTRY}/api-gateway:1.0.0
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8001
+      PAYMENT_SERVICE_URL: http://payment-service:8002
+    depends_on:
+      - order-service
+      - payment-service
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+  

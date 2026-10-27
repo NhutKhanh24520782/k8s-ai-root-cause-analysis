@@ -15,11 +15,7 @@ from prometheus_client import (
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://order_user:${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD}@order-db:5432/orders_db",
-)
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_engine(
     DATABASE_URL,
