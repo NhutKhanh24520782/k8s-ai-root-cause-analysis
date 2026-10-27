@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+httpx
+psycopg[binary]
+prometheus-client

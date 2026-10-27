@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: microservices
+  labels:
+    app: order-service
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: order-service
+
+  template:
+    metadata:
+      labels:
+        app: order-service
+
+    spec:
+      containers:
+        - name: order-service
+          image: ${ECR_REGISTRY}/order-service:1.0.1
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8001
+
+          env:
+            - name: PORT
+              value: "8001"
+
+            - name: DB_HOST
+              value: order-db
+
+            - name: DB_PORT
+              value: "5432"
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: order-db-secret
+                  key: POSTGRES_DB
+
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: order-db-secret
+                  key: POSTGRES_USER
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: order-db-secret
+                  key: POSTGRES_PASSWORD
+                  
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

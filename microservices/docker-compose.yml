@@ -1,0 +1,77 @@
+services:
+  order-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: orders_db
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD}
+    volumes:
+      - order_db_data:/var/lib/postgresql/order_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d orders_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  payment-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: payment_user
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD}
+    volumes:
+      - payment_db_data:/var/lib/postgresql/payment_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_user -d payment_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  order-service:
+    build: ./services/order-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://order_user:${ORDER_DB_PASSWORD:?Set ORDER_DB_PASSWORD}@order-db:5432/orders_db
+    depends_on:
+      order-db:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    networks:
+      - backend
+
+  payment-service:
+    build: ./services/payment-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://payment_user:${PAYMENT_DB_PASSWORD:?Set PAYMENT_DB_PASSWORD}@payment-db:5432/payment_db
+    depends_on:
+      payment-db:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    networks:
+      - backend
+
+  api-gateway:
+    build: ./services/api-gateway
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8001
+      PAYMENT_SERVICE_URL: http://payment-service:8002
+    depends_on:
+      - order-service
+      - payment-service
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+volumes:
+  order_db_data:
+  payment_db_data:
+
+networks:
+  backend:
+    driver: bridge

@@ -1,0 +1,67 @@
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 377.0
+python_gc_objects_collected_total{generation="1"} 61.0
+python_gc_objects_collected_total{generation="2"} 0.0
+# HELP python_gc_objects_uncollectable_total Uncollectable objects found during GC
+# TYPE python_gc_objects_uncollectable_total counter
+python_gc_objects_uncollectable_total{generation="0"} 0.0
+python_gc_objects_uncollectable_total{generation="1"} 0.0
+python_gc_objects_uncollectable_total{generation="2"} 0.0
+# HELP python_gc_collections_total Number of times this generation was collected
+# TYPE python_gc_collections_total counter
+python_gc_collections_total{generation="0"} 184.0
+python_gc_collections_total{generation="1"} 16.0
+python_gc_collections_total{generation="2"} 1.0
+# HELP python_info Python platform information
+# TYPE python_info gauge
+python_info{implementation="CPython",major="3",minor="12",patchlevel="15",version="3.12.15"} 1.0
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 2.93269504e+08
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 8.2485248e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.79274167746e+09
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 1.1900000000000002
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 16.0
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1024.0
+# HELP http_requests_total Total HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{handler="/metrics",method="GET",status="200"} 1.0
+# HELP http_requests_created Total HTTP requests
+# TYPE http_requests_created gauge
+http_requests_created{handler="/metrics",method="GET",status="200"} 1.7927416854211113e+09
+# HELP http_request_duration_seconds HTTP request duration in seconds
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{handler="/metrics",le="0.005",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.01",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.025",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.05",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.075",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.1",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.25",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.5",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="0.75",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="1.0",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="2.5",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="5.0",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="7.5",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="10.0",method="GET"} 1.0
+http_request_duration_seconds_bucket{handler="/metrics",le="+Inf",method="GET"} 1.0
+http_request_duration_seconds_count{handler="/metrics",method="GET"} 1.0
+http_request_duration_seconds_sum{handler="/metrics",method="GET"} 0.001784660999874177
+# HELP http_request_duration_seconds_created HTTP request duration in seconds
+# TYPE http_request_duration_seconds_created gauge
+http_request_duration_seconds_created{handler="/metrics",method="GET"} 1.7927416854211433e+09
+# HELP http_requests_in_flight Number of HTTP requests currently being processed
+# TYPE http_requests_in_flight gauge
+http_requests_in_flight 1.0
