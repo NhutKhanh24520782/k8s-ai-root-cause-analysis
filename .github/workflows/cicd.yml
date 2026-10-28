@@ -318,24 +318,65 @@ jobs:
           kubectl rollout status deployment/order-service   -n $NAMESPACE --timeout=120s
           kubectl rollout status deployment/payment-service -n $NAMESPACE --timeout=120s
 
+      
       - name: Smoke test — microservices /health
+        shell: bash
         run: |
-          # Port-forward each service in the background, hit /health, then kill.
+          set -euo pipefail
+
           for svc_port in "api-gateway:8000" "order-service:8001" "payment-service:8002"; do
             SVC="${svc_port%%:*}"
             PORT="${svc_port##*:}"
-            kubectl port-forward -n $NAMESPACE svc/$SVC $PORT:$PORT &
+            LOG="/tmp/port-forward-${SVC}.log"
+
+            echo "Checking ${SVC} on port ${PORT}..."
+
+            kubectl port-forward \
+              -n "$NAMESPACE" \
+              "svc/$SVC" "18000:$PORT" \
+              > "$LOG" 2>&1 &
             PF_PID=$!
-            sleep 3
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/health)
-            kill $PF_PID 2>/dev/null || true
+
+            cleanup() {
+              kill "$PF_PID" 2>/dev/null || true
+              wait "$PF_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            HTTP=""
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$PF_PID" 2>/dev/null; then
+                echo "Port-forward exited unexpectedly:"
+                cat "$LOG"
+                exit 1
+              fi
+
+              HTTP=$(curl --connect-timeout 2 \
+                --max-time 5 -sS -o /tmp/health-body \
+                -w "%{http_code}" \
+                "http://127.0.0.1:18000/health" 2>/dev/null || true)
+
+              if [ "$HTTP" = "200" ]; then
+                break
+              fi
+
+              sleep 2
+            done
+
+            cleanup
+            trap - EXIT
+
             if [ "$HTTP" = "200" ]; then
               echo "✅ $SVC /health → $HTTP"
             else
-              echo "❌ $SVC /health → $HTTP"
+              echo "❌ $SVC /health failed; HTTP=${HTTP:-connection error}"
+              cat "$LOG"
+              cat /tmp/health-body 2>/dev/null || true
+              kubectl get pods -n "$NAMESPACE" -o wide
               exit 1
             fi
           done
+
 
       # ── Monitoring ─────────────────────────────────────────────────────
       - name: Smoke test — Prometheus pod Running
