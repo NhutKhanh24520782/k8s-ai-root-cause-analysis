@@ -1,0 +1,384 @@
+name: CI — Build & Push to ECR
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least-privilege defaults; individual jobs escalate only what they need.
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. VALIDATE — fast syntax gate, no AWS access required
+  # ─────────────────────────────────────────────────────────────────────────
+  validate:
+    name: Validate Python source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Compile microservice source
+        run: python -m compileall -q microservices/services
+
+      - name: Compile RCA API source
+        run: python -m compileall -q rca-api
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2a. BUILD ONLY (pull request) — verify Dockerfiles; do not push
+  # ─────────────────────────────────────────────────────────────────────────
+  build-pull-request:
+    name: "Build ${{ matrix.image }} (PR check)"
+    needs: validate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api-gateway
+            context: microservices/services/api-gateway
+          - image: order-service
+            context: microservices/services/order-service
+          - image: payment-service
+            context: microservices/services/payment-service
+          - image: rca-api
+            context: rca-api
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          tags: local/${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2b. BUILD & PUSH (push to main) — authenticate to ECR and publish images
+  # ─────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: "Build & push ${{ matrix.image }}"
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC → AWS role assumption (no long-lived keys)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api-gateway
+            context: microservices/services/api-gateway
+          - image: order-service
+            context: microservices/services/order-service
+          - image: payment-service
+            context: microservices/services/payment-service
+          - image: rca-api
+            context: rca-api
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # Assume the GitHub Actions IAM role via OIDC — no long-lived AWS keys
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Tags: sha-<full-sha>  +  latest (main branch only)
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ matrix.image }}
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Job summary
+        run: |
+          echo "### ✅ Image pushed to ECR" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ matrix.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Registry | \`${{ steps.login-ecr.outputs.registry }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tags | \`${{ steps.meta.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. DEPLOY — patch image URIs on EKS then trigger rolling update
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EKS
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC → AWS role assumption
+    env:
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      NAMESPACE: microservices
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ECR registry URL (e.g. 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com)
+      # is resolved dynamically — never hardcoded in any file.
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      # Patch the image field of each Deployment with the real ECR URI + sha tag.
+      # This avoids hardcoding account ID or region anywhere in the YAML manifests.
+      - name: Update image — api-gateway
+        run: |
+          kubectl set image deployment/api-gateway \
+            api-gateway=${{ steps.login-ecr.outputs.registry }}/api-gateway:sha-${{ github.sha }} \
+            -n $NAMESPACE
+
+      - name: Update image — order-service
+        run: |
+          kubectl set image deployment/order-service \
+            order-service=${{ steps.login-ecr.outputs.registry }}/order-service:sha-${{ github.sha }} \
+            -n $NAMESPACE
+
+      - name: Update image — payment-service
+        run: |
+          kubectl set image deployment/payment-service \
+            payment-service=${{ steps.login-ecr.outputs.registry }}/payment-service:sha-${{ github.sha }} \
+            -n $NAMESPACE
+
+      - name: Update image — rca-api
+        run: |
+          kubectl set image deployment/rca-api \
+            rca-api=${{ steps.login-ecr.outputs.registry }}/rca-api:sha-${{ github.sha }} \
+            -n $NAMESPACE
+        continue-on-error: true   # rca-api may not be deployed yet
+
+      # Wait for each rollout to complete (timeout: 3 min per service)
+      - name: Wait for rollouts to finish
+        run: |
+          kubectl rollout status deployment/api-gateway     -n $NAMESPACE --timeout=180s
+          kubectl rollout status deployment/order-service   -n $NAMESPACE --timeout=180s
+          kubectl rollout status deployment/payment-service -n $NAMESPACE --timeout=180s
+
+      - name: Deploy summary
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          SHA="${{ github.sha }}"
+          echo "### 🚀 Deployed to EKS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment | Image |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| api-gateway | \`$REGISTRY/api-gateway:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| order-service | \`$REGISTRY/order-service:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| payment-service | \`$REGISTRY/payment-service:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| rca-api | \`$REGISTRY/rca-api:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. INSTALL-MONITORING — helm upgrade --install kube-prometheus-stack
+  #    Runs in parallel with the deploy job.
+  #    'helm upgrade --install' is idempotent: safe to run on every push.
+  # ─────────────────────────────────────────────────────────────────────────
+  install-monitoring:
+    name: Install / upgrade kube-prometheus-stack
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "latest"
+
+      - name: Add prometheus-community Helm repo
+        run: |
+          helm repo add prometheus-community \
+            https://prometheus-community.github.io/helm-charts
+          helm repo update
+
+      # Uses monitoring/helm-values/kube-prometheus-stack-values.yaml.
+      # --wait blocks until all pods in the release are Ready (timeout: 8 min).
+      # Idempotent: running on an already-installed release is a no-op upgrade.
+      - name: Helm upgrade --install kube-prometheus-stack
+        run: |
+          helm upgrade --install kube-prometheus-stack \
+            prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --values monitoring/helm-values/kube-prometheus-stack-values.yaml \
+            --wait \
+            --timeout 8m
+
+      - name: Verify monitoring pods
+        run: kubectl get pods -n monitoring
+
+      - name: Monitoring summary
+        run: |
+          echo "### 📊 Monitoring stack" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Namespace |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Prometheus | \`monitoring\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Grafana | \`monitoring\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Helm release:** \`kube-prometheus-stack\`  " >> $GITHUB_STEP_SUMMARY
+          echo "**Values file:** \`monitoring/helm-values/kube-prometheus-stack-values.yaml\`" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. SMOKE-TEST — verify microservices + monitoring after deploy
+  #    Runs after both deploy and install-monitoring finish.
+  # ─────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke test
+    needs: [deploy, install-monitoring]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      NAMESPACE: microservices
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      # ── Microservices ───────────────────────────────────────────────────
+      - name: Wait — microservices rollout complete
+        run: |
+          kubectl rollout status deployment/api-gateway     -n $NAMESPACE --timeout=120s
+          kubectl rollout status deployment/order-service   -n $NAMESPACE --timeout=120s
+          kubectl rollout status deployment/payment-service -n $NAMESPACE --timeout=120s
+
+      - name: Smoke test — microservices /health
+        run: |
+          # Port-forward each service in the background, hit /health, then kill.
+          for svc_port in "api-gateway:8000" "order-service:8001" "payment-service:8002"; do
+            SVC="${svc_port%%:*}"
+            PORT="${svc_port##*:}"
+            kubectl port-forward -n $NAMESPACE svc/$SVC $PORT:$PORT &
+            PF_PID=$!
+            sleep 3
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/health)
+            kill $PF_PID 2>/dev/null || true
+            if [ "$HTTP" = "200" ]; then
+              echo "✅ $SVC /health → $HTTP"
+            else
+              echo "❌ $SVC /health → $HTTP"
+              exit 1
+            fi
+          done
+
+      # ── Monitoring ─────────────────────────────────────────────────────
+      - name: Smoke test — Prometheus pod Running
+        run: |
+          kubectl wait pod \
+            -n monitoring \
+            -l app.kubernetes.io/name=prometheus \
+            --for=condition=Ready \
+            --timeout=120s
+          echo "✅ Prometheus pod Ready"
+
+      - name: Smoke test — Grafana pod Running
+        run: |
+          kubectl wait pod \
+            -n monitoring \
+            -l app.kubernetes.io/name=grafana \
+            --for=condition=Ready \
+            --timeout=120s
+          echo "✅ Grafana pod Ready"
+
+      - name: Smoke test summary
+        run: |
+          echo "### ✅ Smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| api-gateway /health | ✅ 200 OK |" >> $GITHUB_STEP_SUMMARY
+          echo "| order-service /health | ✅ 200 OK |" >> $GITHUB_STEP_SUMMARY
+          echo "| payment-service /health | ✅ 200 OK |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prometheus pod Ready | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Grafana pod Ready | ✅ |" >> $GITHUB_STEP_SUMMARY
+
