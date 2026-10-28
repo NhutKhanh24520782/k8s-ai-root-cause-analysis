@@ -32,9 +32,6 @@ jobs:
       - name: Compile microservice source
         run: python -m compileall -q microservices/services
 
-      - name: Compile RCA API source
-        run: python -m compileall -q rca-api
-
   # ─────────────────────────────────────────────────────────────────────────
   # 2a. BUILD ONLY (pull request) — verify Dockerfiles; do not push
   # ─────────────────────────────────────────────────────────────────────────
@@ -53,8 +50,7 @@ jobs:
             context: microservices/services/order-service
           - image: payment-service
             context: microservices/services/payment-service
-          - image: rca-api
-            context: rca-api
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -92,8 +88,7 @@ jobs:
             context: microservices/services/order-service
           - image: payment-service
             context: microservices/services/payment-service
-          - image: rca-api
-            context: rca-api
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
