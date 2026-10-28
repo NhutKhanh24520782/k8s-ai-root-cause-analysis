@@ -21,8 +21,11 @@ spec:
     spec:
       containers:
         - name: payment-service
-          image: ${ECR_REGISTRY}/payment-service:1.0.0
-          imagePullPolicy: IfNotPresent
+          # Image is set at deploy time by the CI/CD pipeline (cicd.yml → deploy job).
+          # Placeholder keeps the manifest valid for 'kubectl apply' without hardcoding
+          # the AWS account ID or region.
+          image: REGISTRY/payment-service:latest
+          imagePullPolicy: Always
 
           ports:
             - name: http

@@ -21,8 +21,11 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: ${ECR_REGISTRY}/api-gateway:1.0.0
-          imagePullPolicy: IfNotPresent
+          # Image is set at deploy time by the CI/CD pipeline (cicd.yml → deploy job).
+          # Placeholder keeps the manifest valid for 'kubectl apply' without hardcoding
+          # the AWS account ID or region.
+          image: REGISTRY/api-gateway:latest
+          imagePullPolicy: Always
 
           ports:
             - name: http
