@@ -32,9 +32,6 @@ jobs:
       - name: Compile microservice source
         run: python -m compileall -q microservices/services
 
-      - name: Compile RCA API source
-        run: python -m compileall -q rca-api
-
   # ─────────────────────────────────────────────────────────────────────────
   # 2a. BUILD ONLY (pull request) — verify Dockerfiles; do not push
   # ─────────────────────────────────────────────────────────────────────────
@@ -53,8 +50,7 @@ jobs:
             context: microservices/services/order-service
           - image: payment-service
             context: microservices/services/payment-service
-          - image: rca-api
-            context: rca-api
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -92,8 +88,7 @@ jobs:
             context: microservices/services/order-service
           - image: payment-service
             context: microservices/services/payment-service
-          - image: rca-api
-            context: rca-api
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -196,13 +191,6 @@ jobs:
             payment-service=${{ steps.login-ecr.outputs.registry }}/payment-service:sha-${{ github.sha }} \
             -n $NAMESPACE
 
-      - name: Update image — rca-api
-        run: |
-          kubectl set image deployment/rca-api \
-            rca-api=${{ steps.login-ecr.outputs.registry }}/rca-api:sha-${{ github.sha }} \
-            -n $NAMESPACE
-        continue-on-error: true   # rca-api may not be deployed yet
-
       # Wait for each rollout to complete (timeout: 3 min per service)
       - name: Wait for rollouts to finish
         run: |
@@ -221,7 +209,6 @@ jobs:
           echo "| api-gateway | \`$REGISTRY/api-gateway:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
           echo "| order-service | \`$REGISTRY/order-service:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
           echo "| payment-service | \`$REGISTRY/payment-service:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| rca-api | \`$REGISTRY/rca-api:sha-$SHA\` |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────────────────
   # 4. INSTALL-MONITORING — helm upgrade --install kube-prometheus-stack
