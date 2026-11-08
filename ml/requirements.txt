@@ -1,0 +1,11 @@
+# ML Dependencies for Root Cause Analysis (Đình Tân — Machine Learning)
+scikit-learn>=1.4.0
+pandas>=2.0.0
+numpy>=1.24.0
+joblib>=1.3.0
+matplotlib>=3.7.0
+boto3>=1.34.0
+pyyaml>=6.0
+pydantic>=2.0.0
+mlflow-skinny>=3.0.0
+skops>=0.16.0
