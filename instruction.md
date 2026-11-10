@@ -13,13 +13,13 @@ Docker Build → ECR Push
     ↓
 PostgreSQL (StatefulSet) → Microservices → kube-prometheus-stack
     ↓
-Smoke Tests (Phase A1 & A2)
+Smoke Tests 
     ↓
-Fault Injection & Metrics Collection (Phase A3 — Đình Tân)
+Fault Injection & Metrics Collection 
     ↓
-Feature Engineering & Model Training / MLflow (Phase B1 — Đình Tân)
+Feature Engineering & Model Training / MLflow 
     ↓
-RCA FastAPI & Slack Alert (Phase B2 — Phước Thọ)
+RCA FastAPI & Slack Alert
 ```
 
 ---
@@ -89,7 +89,7 @@ aws ecr get-login-password --region ap-southeast-1 \
 for svc in api-gateway order-service payment-service; do
   docker build -t $ECR_REGISTRY/$svc:1.0.0 microservices/services/$svc/
   docker push $ECR_REGISTRY/$svc:1.0.0
-  echo "✅ Pushed $svc"
+  echo " Pushed $svc"
 done
 ```
 
@@ -221,7 +221,7 @@ pip install -r ml/requirements.txt
 ---
 
 ### Cách 1: Kiểm thử nhanh không cần bật cluster EKS (Offline Synthetic Mode — Khuyến nghị)
-> 💡 **Phù hợp nhất để các bạn trong nhóm test nhanh code ML trên máy cá nhân mà không tốn chi phí AWS EKS.**
+>  **Phù hợp nhất để các bạn trong nhóm test nhanh code ML trên máy cá nhân mà không tốn chi phí AWS EKS.**
 
 #### Bước 1 — Tạo dataset chuẩn hóa:
 ```bash
@@ -255,7 +255,7 @@ python ml/src/predict.py
 ---
 
 ### Cách 2: Chạy trực tiếp trên Live EKS Cluster (Live EKS + Prometheus)
-> 💡 **Sử dụng khi cụm EKS đang chạy và đã triển khai microservices + kube-prometheus-stack.**
+>  **Sử dụng khi cụm EKS đang chạy và đã triển khai microservices + kube-prometheus-stack.**
 
 #### Bước 1 — Port-forward Prometheus về máy local:
 ```bash
@@ -342,4 +342,4 @@ kubectl delete namespace microservices monitoring ml-stack
 terraform -chdir=terraform destroy
 ```
 
-> ⚠️ **Chi phí:** EKS cluster + NAT Gateway + EC2 nodes tốn ~$5–10/ngày. Nhớ `terraform destroy` sau khi test xong!
+>  **Chi phí:** EKS cluster + NAT Gateway + EC2 nodes tốn ~$5–10/ngày. Nhớ `terraform destroy` sau khi test xong!
