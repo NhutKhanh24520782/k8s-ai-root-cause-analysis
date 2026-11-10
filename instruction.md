@@ -13,7 +13,13 @@ Docker Build → ECR Push
     ↓
 PostgreSQL (StatefulSet) → Microservices → kube-prometheus-stack
     ↓
-Smoke Tests
+Smoke Tests (Phase A1 & A2)
+    ↓
+Fault Injection & Metrics Collection (Phase A3 — Đình Tân)
+    ↓
+Feature Engineering & Model Training / MLflow (Phase B1 — Đình Tân)
+    ↓
+RCA FastAPI & Slack Alert (Phase B2 — Phước Thọ)
 ```
 
 ---
@@ -197,6 +203,132 @@ kubectl port-forward -n monitoring \
 kubectl get secret -n monitoring kube-prometheus-stack-grafana \
   -o jsonpath="{.data.admin-password}" | base64 --decode
 ```
+
+---
+
+## Quy trình Chạy Fault Injection, Thu thập Data & Train Model ML (Thành viên 3 — Đình Tân)
+
+Phần này hướng dẫn các thành viên trong nhóm (hoặc người kiểm thử) chạy và kiểm tra toàn bộ pipeline của **Thành viên 3 (Phase A3 & Phase B1)**: từ **Bơm lỗi (Fault Injection)**, **Thu thập dữ liệu Prometheus**, **Feature Engineering**, đến **Huấn luyện mô hình ML (MLflow tracking)** và **Kiểm tra suy luận (Inference test)**.
+
+### 1. Chuẩn bị môi trường Python
+
+Cài đặt các thư viện cần thiết cho phần Machine Learning:
+```bash
+pip install -r ml/requirements.txt
+```
+*(Yêu cầu Python >= 3.10. Gồm: `scikit-learn`, `pandas`, `numpy`, `joblib`, `mlflow-skinny`, `pydantic`, `skops`, `matplotlib`)*
+
+---
+
+### Cách 1: Kiểm thử nhanh không cần bật cluster EKS (Offline Synthetic Mode — Khuyến nghị)
+> 💡 **Phù hợp nhất để các bạn trong nhóm test nhanh code ML trên máy cá nhân mà không tốn chi phí AWS EKS.**
+
+#### Bước 1 — Tạo dataset chuẩn hóa:
+```bash
+python scripts/data_collection/generate_synthetic_data.py --samples 900 --output ml/data/dataset_cleaned.csv
+```
+*Tạo 900 mẫu metrics theo 36 chu kỳ (`run_id`), đầy đủ 6 nhãn sự cố theo đúng phân phối Prometheus thực tế.*
+
+#### Bước 2 — Huấn luyện mô hình (Feature Engineering + Group Split + MLflow):
+```bash
+python ml/src/train.py
+```
+*Script sẽ tự động:*
+1. Tính toán 5 derived features: `gw_to_order_latency_ratio`, `error_cascade_score`, `order_cpu_spike`, `payment_mem_growth_rate`, `db_latency_vs_order_latency`.
+2. Chia tập Train/Test theo `run_id` (tránh rò rỉ dữ liệu).
+3. Huấn luyện 3 mô hình: Baseline (Dummy), Random Forest, Gradient Boosting.
+4. Log metrics, tham số và model vào MLflow (`./mlruns`).
+5. Xuất model tối ưu ra `ml/models/rca_random_forest.joblib`, ma trận nhầm lẫn `ml/models/confusion_matrix.png`, và báo cáo `ml/models/evaluation_report.json` (Macro F1 đạt **~0.99**).
+
+#### Bước 3 — Bật giao diện MLflow UI xem kết quả thực nghiệm:
+```bash
+mlflow ui --backend-store-uri ./mlruns --port 5000
+```
+*Mở trình duyệt truy cập: [http://localhost:5000](http://localhost:5000) để xem bảng so sánh các lần train, biểu đồ tham số, confusion matrix.*
+
+#### Bước 4 — Kiểm thử hàm suy luận (Inference test) bàn giao cho Phase B2:
+```bash
+python ml/src/predict.py
+```
+*Script sẽ kiểm thử dự đoán trên 2 mẫu dữ liệu giả định và trả về kết quả JSON đúng chuẩn `rca-api/schemas.py`: nhãn chẩn đoán nguyên nhân gốc (`predicted_root_cause`), độ tin cậy (`confidence`), và top 2 khả năng cao nhất (`top_2_predictions`).*
+
+---
+
+### Cách 2: Chạy trực tiếp trên Live EKS Cluster (Live EKS + Prometheus)
+> 💡 **Sử dụng khi cụm EKS đang chạy và đã triển khai microservices + kube-prometheus-stack.**
+
+#### Bước 1 — Port-forward Prometheus về máy local:
+```bash
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090
+```
+
+#### Bước 2 — Bơm lỗi vào cụm (Fault Injection):
+Có 2 lựa chọn:
+
+* **Lựa chọn A — Bơm lỗi tự động toàn bộ chu kỳ (Khuyến nghị để lấy dataset đầy đủ):**
+  ```bash
+  # Tự động lần lượt chạy: normal → cpu_stress → memory_leak → db_slowness → payment_failure → network_latency
+  python scripts/fault_injection/run_collection_cycle.py --cycles 2 --step-duration 180
+  ```
+
+* **Lựa chọn B — Bơm từng lỗi cụ thể để test riêng lẻ:**
+  * **CPU Stress (Order Service):**
+    ```bash
+    python scripts/fault_injection/inject_cpu_stress.py --duration 120
+    # Hoặc qua shell script:
+    bash scripts/fault_injection/inject_cpu_stress.sh 120
+    ```
+  * **Payment Service Failure (500 Error):**
+    ```bash
+    python scripts/fault_injection/inject_payment_failure.py --duration 120 --rate 0.8
+    ```
+  * **Database Slowness (Trì hoãn query):**
+    ```bash
+    python scripts/fault_injection/inject_db_slowness.py --delay 3.0 --duration 120
+    ```
+  * **Memory Leak:**
+    ```bash
+    python scripts/fault_injection/inject_memory_leak.py --duration 120
+    ```
+  * **Network Latency:**
+    ```bash
+    python scripts/fault_injection/inject_network_latency.py --latency 200ms --duration 120
+    # Hoặc:
+    bash scripts/fault_injection/inject_network_latency.sh 200ms 120
+    ```
+
+#### Bước 3 — Thu thập metrics từ Prometheus:
+```bash
+# Thu thập metrics với rate(...[2m]) tránh jitter
+python scripts/data_collection/collect_metrics.py \
+  --prom-url http://localhost:9090 \
+  --output ml/data/dataset_raw.csv \
+  --window 60m \
+  --step 15s
+```
+
+#### Bước 4 — Làm sạch & Export dataset chuẩn:
+```bash
+python scripts/data_collection/export_dataset.py \
+  --input ml/data/dataset_raw.csv \
+  --output ml/data/dataset_cleaned.csv
+```
+*(Tùy chọn tải lên S3: `python scripts/data_collection/upload_to_s3.py --bucket <S3_BUCKET_NAME> --file ml/data/dataset_cleaned.csv`)*
+
+#### Bước 5 — Huấn luyện và cập nhật mô hình:
+```bash
+python ml/src/train.py
+```
+
+---
+
+### 3. Cấu trúc tài nguyên bàn giao cho Phase B2 (Phước Thọ — FastAPI)
+
+Các thành viên phụ trách Phase B2 có thể tích hợp trực tiếp dựa trên các artifacts đã chuẩn bị sẵn:
+1. **Model đã huấn luyện:** `ml/models/rca_random_forest.joblib`
+2. **Hàm suy luận chuẩn:** `ml/src/predict.py` (`predict_root_cause(metrics_dict)`)
+3. **Pydantic Schemas:** `rca-api/schemas.py` (`RCARequest`, `RCAResponse`, `TopPrediction`)
+4. **Tài liệu bàn giao chi tiết:** `docs/handover_b1_to_b2.md`
 
 ---
 
