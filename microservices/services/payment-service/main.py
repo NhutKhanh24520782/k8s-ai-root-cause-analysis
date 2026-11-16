@@ -1,4 +1,3 @@
-
 from asyncio.log import logger
 import os
 import time
@@ -19,7 +18,6 @@ from prometheus_client import (
 )
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
-
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -70,10 +68,10 @@ ORDER_SERVICE_URL = os.getenv(
     "http://order-service:8001",
 )
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     last_error = None
+
     for _ in range(20):
         try:
             with engine.begin() as connection:
@@ -106,7 +104,6 @@ async def lifespan(app: FastAPI):
 
     yield
     engine.dispose()
-
 
 app = FastAPI(
     title="Payment Service",
@@ -178,11 +175,9 @@ async def prometheus_middleware(request: Request, call_next):
 
         HTTP_REQUESTS_IN_FLIGHT.dec()
 
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
 
 @app.get("/health/ready")
 def readiness():
@@ -204,7 +199,6 @@ def readiness():
             },
         )
 
-
 @app.get("/metrics")
 def metrics():
     return Response(
@@ -221,7 +215,6 @@ def serialize_payment(row):
         )
 
     return result
-
 
 async def validate_order(order_id: uuid.UUID) -> None:
     try:
@@ -251,6 +244,7 @@ async def validate_order(order_id: uuid.UUID) -> None:
 @app.post("/payments", status_code=201)
 async def create_payment(payment: PaymentRequest):
     PAYMENT_ATTEMPTS.inc()
+
     if SIMULATE_FAILURE and random.random() < FAULT_PROBABILITY:
         raise HTTPException(
             status_code=500,
@@ -301,7 +295,6 @@ async def create_payment(payment: PaymentRequest):
             detail="Payment database unavailable",
         )
 
-
 @app.get("/payments")
 def list_payments():
     try:
@@ -321,7 +314,6 @@ def list_payments():
             status_code=503,
             detail="Payment database unavailable",
         )
-
 
 @app.get("/payments/{payment_id}")
 def get_payment(payment_id: uuid.UUID):
@@ -372,7 +364,6 @@ def delete_payment(payment_id: uuid.UUID):
             )
 
         return Response(status_code=204)
-
 
     except SQLAlchemyError:
         raise HTTPException(

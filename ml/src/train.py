@@ -1,31 +1,8 @@
-"""
-ml/src/train.py
-
-Training pipeline for Root Cause Analysis:
-1. Loads dataset and splits into Train/Test using GroupShuffleSplit based on `run_id`
-   (ensures no temporal data leakage between runs).
-2. Computes derived domain features (feature_engineering).
-3. Trains:
-   - Baseline: Rule-based threshold heuristic classifier
-   - Model 1: Random Forest Classifier (MVP)
-   - Model 2: Gradient Boosting Classifier (HistGradientBoosting)
-4. Evaluates performance against acceptance criteria (macro_f1 > 0.75).
-5. Tracks runs in MLflow with exact run structure specified in project instructions:
-   - mlflow.log_params()
-   - mlflow.log_metrics()
-   - mlflow.sklearn.log_model()
-   - mlflow.log_artifact()
-
-Usage:
-    python ml/src/train.py --data ml/data/dataset_cleaned.csv --model all
-"""
-
 import argparse
 import json
 import os
 import sys
 
-# Ensure local ml/src modules can be imported when running from any working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import joblib
@@ -42,9 +19,7 @@ from data_loader import load_from_csv, split_features_and_target
 from feature_engineering import compute_derived_features_df
 from evaluate import evaluate_model
 
-
 class RuleBasedBaselineClassifier:
-    """Heuristic rule-based threshold classifier for baseline comparison."""
     def __init__(self, label_encoder: LabelEncoder):
         self.le = label_encoder
         self.classes_ = label_encoder.classes_
@@ -67,12 +42,10 @@ class RuleBasedBaselineClassifier:
             preds.append(pred)
         return self.le.transform(preds)
 
-
 def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "ml/models", test_size: float = 0.25):
     print(f"[*] Starting RCA Training Pipeline on: {data_path}")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Configure MLflow tracking
     os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
     mlflow.set_tracking_uri(tracking_uri)
@@ -80,11 +53,9 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
     mlflow.set_experiment(experiment_name)
     print(f"[*] MLflow tracking URI: {tracking_uri} | Experiment: {experiment_name}")
 
-    # 1. Load data
     df = load_from_csv(data_path)
     X_raw, y_raw, groups = split_features_and_target(df)
 
-    # 2. Encode labels
     le = LabelEncoder()
     y_encoded = le.fit_transform(y_raw)
     class_names = list(le.classes_)
@@ -92,7 +63,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
 
     joblib.dump(le, os.path.join(output_dir, "label_encoder.joblib"))
 
-    # 3. Feature engineering
     print("[*] Performing feature engineering...")
     X_features = compute_derived_features_df(X_raw)
     feature_names = list(X_features.columns)
@@ -100,8 +70,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
     with open(os.path.join(output_dir, "feature_names.json"), "w", encoding="utf-8") as f:
         json.dump(feature_names, f, indent=2)
 
-    # 4. Train / Test Split using Group-based split on run_id
-    # Critical requirement: Observations from the same run appear exclusively in Train OR Test
     if groups.nunique() > 1:
         print(f"[*] Splitting dataset via run_id groups ({groups.nunique()} unique runs across classes)...")
         unique_runs = pd.DataFrame({"run_id": groups, "label": y_encoded}).drop_duplicates()
@@ -129,14 +97,12 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
 
     results = {}
 
-    # 5. Baseline Evaluation (MLflow Run 1)
     print("\n>>> Evaluating Rule-based Threshold Baseline...")
     with mlflow.start_run(run_name="baseline-threshold-v1"):
         baseline = RuleBasedBaselineClassifier(le)
         baseline_results = evaluate_model(baseline, X_test, y_test, class_names, output_dir=output_dir)
         results["baseline"] = baseline_results["macro_f1"]
 
-        mlflow.log_params({"classifier_type": "rule_based_threshold"})
         mlflow.log_metrics({
             "accuracy": baseline_results["accuracy"],
             "macro_f1": baseline_results["macro_f1"],
@@ -146,7 +112,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
         if os.path.exists(cm_path):
             mlflow.log_artifact(cm_path)
 
-    # 6. Random Forest Classifier MVP (MLflow Run 2)
     if model_type in ["rf", "all"]:
         print("\n>>> Training Random Forest Classifier (MVP)...")
         with mlflow.start_run(run_name="random-forest-v1"):
@@ -155,7 +120,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
                 "max_depth": 10,
                 "min_samples_split": 4,
                 "random_state": 42,
-                "class_weight": "balanced",
             }
             rf = RandomForestClassifier(**rf_params)
             rf.fit(X_train, y_train)
@@ -166,7 +130,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
             print(f"[OK] Random Forest model saved to: {rf_path}")
             results["random_forest"] = rf_results["macro_f1"]
 
-            # Exact MLflow run structure matching project documentation:
             mlflow.log_params({"n_estimators": rf_params["n_estimators"], "max_depth": rf_params["max_depth"]})
             mlflow.log_metrics({
                 "macro_f1": round(rf_results["macro_f1"], 4),
@@ -181,7 +144,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
             if os.path.exists(cm_path):
                 mlflow.log_artifact(cm_path)
 
-    # 7. Gradient Boosting Classifier (MLflow Run 3)
     if model_type in ["gb", "all"]:
         print("\n>>> Training HistGradientBoosting Classifier...")
         with mlflow.start_run(run_name="gradient-boosting-v1"):
@@ -214,7 +176,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
             if os.path.exists(cm_path):
                 mlflow.log_artifact(cm_path)
 
-    # 8. Comparison Summary
     print("\n" + "=" * 50)
     print("           MODEL COMPARISON SUMMARY")
     print("=" * 50)
@@ -223,7 +184,6 @@ def train_pipeline(data_path: str, model_type: str = "all", output_dir: str = "m
     print("=" * 50 + "\n")
 
     return results
-
 
 def main():
     parser = argparse.ArgumentParser(description="Train RCA models.")
@@ -234,7 +194,6 @@ def main():
     args = parser.parse_args()
 
     train_pipeline(args.data, args.model, args.output_dir, args.test_size)
-
 
 if __name__ == "__main__":
     main()

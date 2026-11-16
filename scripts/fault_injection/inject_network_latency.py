@@ -1,17 +1,6 @@
-"""
-scripts/fault_injection/inject_network_latency.py
-
-Injects artificial network latency between services via container tc or deployment env patch.
-
-Usage:
-    python scripts/fault_injection/inject_network_latency.py --service order-service --delay-ms 200
-    python scripts/fault_injection/inject_network_latency.py --restore --service order-service
-"""
-
 import argparse
 import subprocess
 import sys
-
 
 def run_cmd(cmd: list) -> bool:
     print(f"[*] Running: {' '.join(cmd)}")
@@ -26,7 +15,6 @@ def run_cmd(cmd: list) -> bool:
     except FileNotFoundError:
         print(f"[ERR] Executable '{cmd[0]}' not found.", file=sys.stderr)
         return False
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject or restore network latency.")
@@ -64,7 +52,6 @@ def main():
         print("[OK] Finished network latency update.")
     else:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

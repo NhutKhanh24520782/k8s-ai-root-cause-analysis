@@ -1,15 +1,3 @@
-"""
-scripts/data_collection/generate_synthetic_data.py
-
-Generates realistic telemetry dataset for all 6 fault types based on microservice physics
-and baseline distributions.
-Generates distinct runs per scenario with `run_id` for group-based train/test splitting
-to ensure strict absence of data leakage and realistic generalization testing.
-
-Usage:
-    python scripts/data_collection/generate_synthetic_data.py --runs-per-class 6 --samples-per-run 20 --output dataset/full_metrics_dataset.csv
-"""
-
 import argparse
 import csv
 import os
@@ -38,23 +26,19 @@ FIELDS = [
     "db_connection_count",
 ]
 
-
 def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_time: datetime) -> list:
     rows = []
     current_time = start_time
 
-    # Run-level seed jitter for varied condition across runs
     run_intensity = np.random.uniform(0.85, 1.15)
     base_traffic = max(1.0, np.random.normal(5.0, 0.6))
 
-    # Base state
     mem_leak_accumulator = 75.0 + np.random.uniform(0.0, 10.0)
 
     for i in range(n_samples):
         current_time += timedelta(seconds=15)
         iso_time = current_time.isoformat()
 
-        # Healthy baseline jitter
         base_req_rate = max(0.1, np.random.normal(base_traffic, 0.3))
         gw_lat = max(2.0, np.random.normal(8.0, 1.2))
         order_lat = max(1.5, np.random.normal(5.0, 0.8))
@@ -73,7 +57,7 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
             pass
 
         elif fault_type == "cpu_stress":
-            # Target order CPU high load
+
             order_cpu = np.clip(np.random.uniform(0.70, 0.98) * run_intensity, 0.65, 0.99)
             order_lat = np.random.uniform(30.0, 85.0) * run_intensity
             gw_lat = order_lat + np.random.uniform(10.0, 25.0)
@@ -81,7 +65,7 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
                 gw_err = np.random.uniform(0.02, 0.08)
 
         elif fault_type == "payment_failure":
-            # Payment service fails with 5xx
+
             payment_err = np.clip(np.random.uniform(0.40, 0.95) * run_intensity, 0.30, 0.99)
             gw_err = payment_err * np.random.uniform(0.85, 1.0)
             order_err = payment_err * np.random.uniform(0.80, 0.95)
@@ -89,7 +73,7 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
             gw_lat = np.random.uniform(25.0, 60.0)
 
         elif fault_type == "db_slowness":
-            # Database query latency shoots up
+
             db_lat = np.random.uniform(250.0, 1200.0) * run_intensity
             db_conn = np.clip(np.random.uniform(18.0, 30.0) * run_intensity, 12.0, 32.0)
             order_lat = db_lat + np.random.uniform(15.0, 50.0)
@@ -98,7 +82,7 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
                 gw_err = np.random.uniform(0.05, 0.20)
 
         elif fault_type == "memory_leak":
-            # Memory steadily creeps upwards
+
             mem_leak_accumulator += np.random.uniform(3.0, 7.5) * run_intensity
             payment_mem = mem_leak_accumulator
             if payment_mem > 250.0:
@@ -107,7 +91,7 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
                     payment_err = np.random.uniform(0.05, 0.18)
 
         elif fault_type == "network_latency":
-            # Cross-service network transit latency injection
+
             network_delay = np.random.uniform(150.0, 400.0) * run_intensity
             gw_lat = order_lat + network_delay + np.random.uniform(10.0, 30.0)
             order_lat = payment_lat + (network_delay / 2.0)
@@ -135,7 +119,6 @@ def generate_scenario_run(fault_type: str, run_id: str, n_samples: int, start_ti
         rows.append(row)
 
     return rows
-
 
 def generate_full_dataset(output_path: str, runs_per_class: int = 6, samples_per_run: int = 20):
     classes = [
@@ -166,7 +149,6 @@ def generate_full_dataset(output_path: str, runs_per_class: int = 6, samples_per
         writer.writerows(all_rows)
 
     print(f"[OK] Successfully generated {len(all_rows)} samples across {len(classes) * runs_per_class} runs at: {output_path}")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

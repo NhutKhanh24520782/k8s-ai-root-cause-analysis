@@ -1,14 +1,3 @@
-"""
-scripts/data_collection/upload_to_s3.py
-
-Uploads collected and exported datasets to AWS S3 storage under:
-s3://<bucket-name>/datasets/labeled/<filename>
-
-Usage:
-    python scripts/data_collection/upload_to_s3.py --file dataset/full_metrics_dataset.csv --bucket mlops-tfstate-team
-    python scripts/data_collection/upload_to_s3.py --file ml/data/dataset_cleaned.csv
-"""
-
 import argparse
 import os
 import sys
@@ -17,7 +6,6 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 DEFAULT_BUCKET = os.getenv("S3_DATASET_BUCKET", "mlops-tfstate-team")
 DEFAULT_PREFIX = "datasets/labeled"
-
 
 def upload_dataset(file_path: str, bucket_name: str, prefix: str = DEFAULT_PREFIX) -> bool:
     if not os.path.exists(file_path):
@@ -31,7 +19,7 @@ def upload_dataset(file_path: str, bucket_name: str, prefix: str = DEFAULT_PREFI
 
     try:
         s3_client = boto3.client("s3")
-        # Attempt upload
+
         s3_client.upload_file(file_path, bucket_name, s3_key)
         print(f"[OK] Successfully uploaded to s3://{bucket_name}/{s3_key}")
         return True
@@ -49,7 +37,6 @@ def upload_dataset(file_path: str, bucket_name: str, prefix: str = DEFAULT_PREFI
         print(f"[ERR] Unexpected error uploading to S3: {e}", file=sys.stderr)
         return False
 
-
 def main():
     parser = argparse.ArgumentParser(description="Upload dataset to S3.")
     parser.add_argument("--file", required=True, help="Local file path to upload")
@@ -60,7 +47,6 @@ def main():
     success = upload_dataset(args.file, args.bucket, args.prefix)
     if not success:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

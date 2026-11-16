@@ -1,21 +1,6 @@
-"""
-scripts/fault_injection/inject_memory_leak.py
-
-Injects progressive memory leak into payment-service or order-service
-by updating container environment configuration or allocating buffer.
-
-Usage:
-    # Inject memory leak
-    python scripts/fault_injection/inject_memory_leak.py --service payment-service --rate-mb 20
-
-    # Restore to normal
-    python scripts/fault_injection/inject_memory_leak.py --restore --service payment-service
-"""
-
 import argparse
 import subprocess
 import sys
-
 
 def run_cmd(cmd: list) -> bool:
     print(f"[*] Running: {' '.join(cmd)}")
@@ -30,7 +15,6 @@ def run_cmd(cmd: list) -> bool:
     except FileNotFoundError:
         print(f"[ERR] Executable '{cmd[0]}' not found.", file=sys.stderr)
         return False
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject or restore simulated memory leak.")
@@ -68,7 +52,6 @@ def main():
         print("[OK] Memory leak scenario configured.")
     else:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

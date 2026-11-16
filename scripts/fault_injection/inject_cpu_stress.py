@@ -1,22 +1,10 @@
-"""
-scripts/fault_injection/inject_cpu_stress.py
-
-Triggers CPU stress on microservices pods via kubectl exec or deployment env injection.
-
-Usage:
-    python scripts/fault_injection/inject_cpu_stress.py --service order-service --duration 300
-    python scripts/fault_injection/inject_cpu_stress.py --restore --service order-service
-"""
-
 import argparse
 import subprocess
 import sys
 
-
 def run_cmd(cmd: list) -> str:
     res = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return res.stdout.strip()
-
 
 def get_pod_name(namespace: str, service: str) -> str:
     for label in [f"app={service}", f"app.kubernetes.io/name={service}"]:
@@ -27,7 +15,6 @@ def get_pod_name(namespace: str, service: str) -> str:
         except Exception:
             continue
     return ""
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject CPU stress into service pod.")
@@ -49,7 +36,6 @@ def main():
         ], check=False)
         return
 
-    # 1. Patch deployment env var for persistent CPU load on requests
     print(f"[*] Patching deployment/{args.service} with SIMULATE_CPU_STRESS=true...")
     subprocess.run([
         "kubectl", "-n", args.namespace, "set", "env",
@@ -72,7 +58,6 @@ def main():
     )
     subprocess.run(["kubectl", "exec", "-n", args.namespace, pod, "--", "sh", "-c", stress_cmd], check=False)
     print("[OK] Finished.")
-
 
 if __name__ == "__main__":
     main()

@@ -1,21 +1,6 @@
-"""
-scripts/fault_injection/inject_db_slowness.py
-
-Injects artificial database latency into order-service via deployment env var patch,
-or directly executes pg_sleep in postgresql order-db.
-
-Usage:
-    # Inject 500ms DB delay into order-service
-    python scripts/fault_injection/inject_db_slowness.py --delay-ms 500 --namespace microservices
-
-    # Restore to normal
-    python scripts/fault_injection/inject_db_slowness.py --restore --namespace microservices
-"""
-
 import argparse
 import subprocess
 import sys
-
 
 def run_cmd(cmd: list) -> bool:
     print(f"[*] Running: {' '.join(cmd)}")
@@ -30,7 +15,6 @@ def run_cmd(cmd: list) -> bool:
     except FileNotFoundError:
         print(f"[ERR] Executable '{cmd[0]}' not found.", file=sys.stderr)
         return False
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject or restore database query slowness.")
@@ -68,7 +52,6 @@ def main():
         print("[OK] Operation completed successfully.")
     else:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

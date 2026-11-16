@@ -40,13 +40,12 @@ PAYMENT_SERVICE_URL = os.getenv(
     "PAYMENT_SERVICE_URL",
     "http://payment-service:8002",
 )
+
 SIMULATE_NETWORK_LATENCY = (
     os.getenv("SIMULATE_NETWORK_LATENCY", "false").lower() in {"true", "1", "yes"}
     or os.getenv("FAULT_TYPE", "").lower() == "network_latency"
 )
 NETWORK_LATENCY_MS = float(os.getenv("NETWORK_LATENCY_MS", "200"))
-
-
 
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
@@ -79,11 +78,9 @@ async def prometheus_middleware(request: Request, call_next):
 
         HTTP_REQUESTS_IN_FLIGHT.dec()
 
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
 
 @app.get("/metrics")
 def metrics():
@@ -91,7 +88,6 @@ def metrics():
         generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
-
 
 async def proxy_request(
     request: Request,
@@ -141,7 +137,6 @@ async def proxy_request(
             },
         )
 
-
 @app.api_route(
     "/orders",
     methods=["GET", "POST"],
@@ -158,7 +153,6 @@ async def orders(request: Request, path: str = ""):
         ORDER_SERVICE_URL,
         f"orders{suffix}",
     )
-
 
 @app.api_route(
     "/payments",

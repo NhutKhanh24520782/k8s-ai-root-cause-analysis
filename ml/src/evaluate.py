@@ -1,21 +1,9 @@
-"""
-ml/src/evaluate.py
-
-Evaluation module for Root Cause Analysis classifiers.
-Computes:
-- Macro-averaged F1, Precision, and Recall
-- Per-class metrics
-- Top-1 and Top-2 Accuracy
-- Confusion Matrix (exports text report and PNG figure)
-"""
-
 import json
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
-
 
 def evaluate_model(
     model,
@@ -30,7 +18,6 @@ def evaluate_model(
     acc = float(accuracy_score(y_test, y_pred))
     macro_f1 = float(f1_score(y_test, y_pred, average="macro"))
 
-    # Top-2 accuracy if predict_proba is supported
     top2_acc = acc
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(X_test)
@@ -59,12 +46,10 @@ def evaluate_model(
         "classes": label_classes,
     }
 
-    # Save metrics JSON
     metrics_path = os.path.join(output_dir, "evaluation_report.json")
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
-    # Plot Confusion Matrix
     try:
         fig, ax = plt.subplots(figsize=(8, 6))
         cax = ax.matshow(cm, cmap=plt.cm.Blues, alpha=0.8)

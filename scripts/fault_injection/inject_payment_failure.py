@@ -1,21 +1,6 @@
-"""
-scripts/fault_injection/inject_payment_failure.py
-
-Injects 500 failure responses into payment-service by updating environment variables.
-Also supports restoring payment-service to normal healthy operation.
-
-Usage:
-    # Inject fault
-    python scripts/fault_injection/inject_payment_failure.py --namespace microservices --probability 1.0
-
-    # Restore to normal
-    python scripts/fault_injection/inject_payment_failure.py --restore --namespace microservices
-"""
-
 import argparse
 import subprocess
 import sys
-
 
 def run_cmd(cmd: list) -> bool:
     print(f"[*] Running: {' '.join(cmd)}")
@@ -30,7 +15,6 @@ def run_cmd(cmd: list) -> bool:
     except FileNotFoundError:
         print(f"[ERR] Executable '{cmd[0]}' not found.", file=sys.stderr)
         return False
-
 
 def main():
     parser = argparse.ArgumentParser(description="Inject or restore payment failure.")
@@ -61,7 +45,7 @@ def main():
 
     success = run_cmd(cmd)
     if success:
-        # Wait for rollout
+
         print("[*] Waiting for deployment rollout...")
         run_cmd([
             "kubectl", "-n", args.namespace, "rollout", "status",
@@ -70,7 +54,6 @@ def main():
         print("[OK] Done.")
     else:
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

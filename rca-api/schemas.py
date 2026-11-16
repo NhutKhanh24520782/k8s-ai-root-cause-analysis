@@ -1,17 +1,7 @@
-"""
-rca-api/schemas.py
-
-Interface Contract 2: API Request and Response Schemas
-Defined by: Đình Tân (Machine Learning)
-Consumed by: Phước Thọ (RCA API FastAPI implementation)
-"""
-
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-
 class MetricSnapshotRequest(BaseModel):
-    """Telemetry snapshot request payload for root cause inference."""
     timestamp: Optional[str] = Field(default=None, description="ISO-8601 UTC timestamp")
     gw_request_rate: float = Field(..., ge=0.0, description="API Gateway request rate (req/s)")
     gw_error_rate: float = Field(..., ge=0.0, le=1.0, description="API Gateway 5xx error ratio")
@@ -32,7 +22,6 @@ class MetricSnapshotRequest(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "timestamp": "2026-10-30T10:00:00Z",
                 "gw_request_rate": 12.5,
                 "gw_error_rate": 0.03,
                 "gw_p95_latency": 150.0,
@@ -52,16 +41,13 @@ class MetricSnapshotRequest(BaseModel):
         }
     }
 
-
 class CandidateProbability(BaseModel):
     fault_type: str = Field(..., description="Hypothesized root cause class")
     probability: float = Field(..., ge=0.0, le=1.0, description="Confidence probability (0.0 to 1.0)")
 
-
 class InferenceEvidence(BaseModel):
     key_metrics: List[str] = Field(..., description="Metrics indicating anomalous behavior")
     model_version: str = Field(default="1", description="Model version or MLflow run identifier")
-
 
 class RootCausePredictionResponse(BaseModel):
     predicted_root_cause: str = Field(..., description="Primary predicted root cause category")
@@ -72,21 +58,15 @@ class RootCausePredictionResponse(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "predicted_root_cause": "db_slowness",
                 "confidence": 0.87,
                 "top3_candidates": [
-                    {"fault_type": "db_slowness", "probability": 0.87},
-                    {"fault_type": "cpu_stress", "probability": 0.08},
-                    {"fault_type": "normal", "probability": 0.05},
                 ],
                 "evidence": {
                     "key_metrics": ["db_query_latency_p95", "order_p95_latency"],
-                    "model_version": "1",
                 },
             }
         }
     }
-
 
 class HealthCheckResponse(BaseModel):
     status: str = Field(default="ok", description="Service health state")

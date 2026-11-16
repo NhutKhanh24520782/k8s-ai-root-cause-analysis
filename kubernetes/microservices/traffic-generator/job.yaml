@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aiops-traffic-generator
+  namespace: microservices
+  labels:
+    app: traffic-generator
+    component: aiops-testing
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: traffic-generator
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: traffic-gen
+          image: python:3.11-alpine
+          command: ["python", "-u", "-c"]
+          args:
+            - |
+              import urllib.request, json, time, random
+              gateway = "http://api-gateway:8000"
+              items = ["MacBook Pro 16", "iPhone 15 Pro", "Sony WH-1000XM5", "Running Shoes", "Gaming Mouse"]
+              print("Starting traffic generator job targeting:", gateway)
+              start = time.time()
+              # Run 5 requests/sec for 15 minutes (900 seconds)
+              for i in range(4500):
+                  try:
+                      item = random.choice(items)
+                      odata = json.dumps({"item_name": item, "quantity": random.randint(1, 3)}).encode('utf-8')
+                      req1 = urllib.request.Request(f"{gateway}/orders", data=odata, headers={"Content-Type": "application/json"}, method="POST")
+                      with urllib.request.urlopen(req1, timeout=5) as r1:
+                          ores = json.loads(r1.read().decode('utf-8'))
+                          oid = ores.get("order_id")
+                      if oid:
+                          pdata = json.dumps({"order_id": oid, "amount": round(random.uniform(50.0, 300.0), 2), "currency": "USD"}).encode('utf-8')
+                          req2 = urllib.request.Request(f"{gateway}/payments", data=pdata, headers={"Content-Type": "application/json"}, method="POST")
+                          with urllib.request.urlopen(req2, timeout=5) as r2:
+                              pass
+                  except Exception as e:
+                      pass
+                  if i % 100 == 0:
+                      print(f"Sent {i} request cycles...")
+                  time.sleep(0.2)
+              print("Traffic generation completed.")
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

@@ -1,20 +1,8 @@
-"""
-ml/src/predict.py
-
-Inference module for Root Cause Analysis:
-Loads the trained model artifact and label encoder to predict root cause
-from a metrics snapshot according to the RCA API contract schema.
-
-Usage:
-    python ml/src/predict.py --sample test
-"""
-
 import argparse
 import json
 import os
 import sys
 
-# Ensure local ml/src modules can be imported
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import joblib
@@ -25,7 +13,6 @@ from typing import Dict, Any, List
 from feature_engineering import compute_derived_features_dict
 
 DEFAULT_MODEL_DIR = "ml/models"
-
 
 class RCAPredictor:
     def __init__(self, model_dir: str = DEFAULT_MODEL_DIR):
@@ -43,7 +30,6 @@ class RCAPredictor:
             self.expected_features = json.load(f)
 
     def identify_key_evidence_metrics(self, raw_metrics: Dict[str, Any], predicted_fault: str) -> List[str]:
-        """Identifies key anomaly metrics associated with the predicted fault."""
         key_metrics = []
         if predicted_fault == "payment_failure":
             key_metrics = ["payment_error_rate", "gw_error_rate"]
@@ -60,19 +46,15 @@ class RCAPredictor:
         return key_metrics
 
     def predict(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
-        """Performs RCA prediction on a single telemetry snapshot."""
-        # 1. Feature engineering
+
         full_features = compute_derived_features_dict(snapshot)
 
-        # 2. Align to trained feature ordering
         feature_dict = {f: [float(full_features.get(f, 0.0))] for f in self.expected_features}
         X = pd.DataFrame(feature_dict)
 
-        # 3. Model inference
         probabilities = self.model.predict_proba(X)[0]
         classes = self.label_encoder.classes_
 
-        # 4. Top candidates ranking
         sorted_indices = np.argsort(probabilities)[::-1]
         top_idx = sorted_indices[0]
         predicted_cause = classes[top_idx]
@@ -93,16 +75,13 @@ class RCAPredictor:
             "top3_candidates": top3,
             "evidence": {
                 "key_metrics": evidence_metrics,
-                "model_version": "1",
             },
         }
-
 
 def test_sample():
     predictor = RCAPredictor()
 
     sample_db_slowness = {
-        "timestamp": "2026-10-30T10:00:00Z",
         "gw_request_rate": 5.0,
         "gw_error_rate": 0.02,
         "gw_p95_latency": 550.0,
@@ -124,7 +103,6 @@ def test_sample():
     print("\n--- Inference Result for Sample (Expected: db_slowness) ---")
     print(json.dumps(res, indent=2))
     print("----------------------------------------------------------\n")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

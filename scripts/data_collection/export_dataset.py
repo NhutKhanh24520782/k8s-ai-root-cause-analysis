@@ -1,14 +1,3 @@
-"""
-scripts/data_collection/export_dataset.py
-
-Validates, cleans, and exports collected metrics datasets into processed formats
-(CSV and Parquet) for model training and analysis.
-Ensures `run_id` is present to support GroupShuffleSplit train/test splits.
-
-Usage:
-    python scripts/data_collection/export_dataset.py --input dataset/full_metrics_dataset.csv --output-dir ml/data/
-"""
-
 import argparse
 import os
 import sys
@@ -45,7 +34,6 @@ TARGET_CLASSES = [
     "network_latency",
 ]
 
-
 def process_dataset(input_file: str, output_dir: str):
     if not os.path.exists(input_file):
         print(f"[ERR] Input file not found: {input_file}", file=sys.stderr)
@@ -55,19 +43,16 @@ def process_dataset(input_file: str, output_dir: str):
     df = pd.read_csv(input_file)
     print(f"[*] Loaded {len(df)} rows, {len(df.columns)} columns.")
 
-    # 1. Ensure run_id exists
     if "run_id" not in df.columns:
         print("[WARN] 'run_id' not found in dataset. Generating synthetic run_ids based on fault_type batches...")
         df["run_id"] = df["fault_type"].astype(str) + "_batch_" + (df.index // 20).astype(str)
 
-    # 2. Schema check
     missing_cols = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing_cols:
         print(f"[WARN] Dataset is missing columns: {missing_cols}")
         for c in missing_cols:
             df[c] = np.nan
 
-    # 3. Fault type check and cleanup
     df["fault_type"] = df["fault_type"].astype(str).str.strip().str.lower()
     class_counts = df["fault_type"].value_counts().to_dict()
     runs_count = df.groupby("fault_type")["run_id"].nunique().to_dict()
@@ -77,7 +62,6 @@ def process_dataset(input_file: str, output_dir: str):
         print(f"  - {cls:16s}: {cnt:4d} samples across {runs_count.get(cls, 1)} runs")
     print("--------------------------------\n")
 
-    # 4. Handle numerical columns
     num_cols = [c for c in REQUIRED_COLUMNS if c not in ["run_id", "timestamp", "fault_type"]]
     for col in num_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -103,7 +87,6 @@ def process_dataset(input_file: str, output_dir: str):
     df.to_csv(csv_path, index=False)
     print(f"[OK] Exported clean CSV to: {csv_path}")
 
-    # Summary statistics report
     report_path = os.path.join(output_dir, "dataset_summary.txt")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("=== DATASET SUMMARY ===\n")
@@ -118,7 +101,6 @@ def process_dataset(input_file: str, output_dir: str):
 
     return df
 
-
 def main():
     parser = argparse.ArgumentParser(description="Export and clean metrics dataset.")
     parser.add_argument("--input", default="dataset/full_metrics_dataset.csv", help="Input raw CSV path")
@@ -126,7 +108,6 @@ def main():
     args = parser.parse_args()
 
     process_dataset(args.input, args.output_dir)
-
 
 if __name__ == "__main__":
     main()

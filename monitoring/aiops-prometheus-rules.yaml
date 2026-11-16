@@ -1,0 +1,71 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: aiops-incident-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    - name: aiops.microservices.rules
+      rules:
+        # 1. Payment Service Failure (HTTP 5xx error rate > 5%)
+        - alert: AIOpsPaymentFailureElevated
+          expr: sum(rate(http_requests_total{job=~".*payment.*", status=~"5.."}[2m])) / sum(rate(http_requests_total{job=~".*payment.*"}[2m])) > 0.05
+          for: 30s
+          labels:
+            severity: critical
+            incident_type: payment_failure
+            target_service: payment-service
+          annotations:
+            summary: "High payment transaction failure rate (> 5%)"
+            description: "Payment service is failing transactions with HTTP 500 status. Likely root cause: payment_failure."
+
+        # 2. Database Slow Query Latency (p95 latency > 300ms)
+        - alert: AIOpsDatabaseQuerySlow
+          expr: histogram_quantile(0.95, sum by (le) (rate(db_query_duration_seconds_bucket[2m]))) > 0.3
+          for: 30s
+          labels:
+            severity: warning
+            incident_type: db_slowness
+            target_service: order-service
+          annotations:
+            summary: "Database query latency p95 exceeded 300ms"
+            description: "PostgreSQL query latency is slow, cascading delay into order processing. Likely root cause: db_slowness."
+
+        # 3. CPU Saturation (> 80% sustained)
+        - alert: AIOpsPodCpuSaturation
+          expr: sum by (container) (rate(container_cpu_usage_seconds_total{namespace="microservices", container="order-service"}[2m])) > 0.8
+          for: 45s
+          labels:
+            severity: warning
+            incident_type: cpu_stress
+            target_service: order-service
+          annotations:
+            summary: "CPU utilization on order-service > 80%"
+            description: "High CPU burn detected on order-service pod. Likely root cause: cpu_stress."
+
+        # 4. Memory Leak (RAM growing steadily > 200MB)
+        - alert: AIOpsPodMemoryLeakDetected
+          expr: sum by (container) (container_memory_working_set_bytes{namespace="microservices", container="payment-service"}) > 209715200
+          for: 1m
+          labels:
+            severity: warning
+            incident_type: memory_leak
+            target_service: payment-service
+          annotations:
+            summary: "Payment service memory consumption unusually high (>200MB)"
+            description: "Memory footprint growing monotonically over time. Likely root cause: memory_leak."
+
+        # 5. Gateway Latency Spike (p95 > 250ms)
+        - alert: AIOpsGatewayLatencySpike
+          expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~".*api-gateway.*"}[2m]))) > 0.25
+          for: 30s
+          labels:
+            severity: warning
+            incident_type: network_latency
+            target_service: api-gateway
+          annotations:
+            summary: "API Gateway p95 latency exceeds 250ms"
+            description: "External requests experience elevated latency. Likely root cause: network_latency or cascading slowdown."

@@ -61,7 +61,6 @@ SIMULATE_CPU_STRESS = (
     or os.getenv("FAULT_CPU_STRESS", "false").lower() in {"true", "1", "yes"}
 )
 
-
 def execute_with_db_metrics(operation_fn):
     DB_CONNECTIONS_ACTIVE.inc()
     start_time = time.perf_counter()
@@ -74,10 +73,9 @@ def execute_with_db_metrics(operation_fn):
         DB_QUERY_DURATION.observe(duration)
         DB_CONNECTIONS_ACTIVE.dec()
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Khởi tạo bảng khi service khởi động.
+
     last_error = None
 
     for _ in range(20):
@@ -114,29 +112,24 @@ async def lifespan(app: FastAPI):
     yield
     engine.dispose()
 
-
 app = FastAPI(
     title="Order Service",
     lifespan=lifespan,
 )
 
-
 class OrderCreate(BaseModel):
     item_name: str = Field(min_length=1, max_length=200)
     quantity: int = Field(gt=0)
-
 
 class OrderUpdate(BaseModel):
     item_name: str | None = Field(default=None, min_length=1)
     quantity: int | None = Field(default=None, gt=0)
     status: str | None = None
 
-
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
     start_time = time.perf_counter()
 
-    # Fault simulation: CPU Stress on request
     if SIMULATE_CPU_STRESS:
         burn_end = time.perf_counter() + 0.15
         while time.perf_counter() < burn_end:
@@ -169,8 +162,6 @@ async def prometheus_middleware(request: Request, call_next):
 
         HTTP_REQUESTS_IN_FLIGHT.dec()
 
-
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -195,14 +186,12 @@ def readiness():
             },
         )
 
-
 @app.get("/metrics")
 def metrics():
     return Response(
         generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
-
 
 def serialize_order(row):
     result = dict(row._mapping)
@@ -213,7 +202,6 @@ def serialize_order(row):
         )
 
     return result
-
 
 @app.get("/orders")
 def list_orders():
@@ -231,7 +219,6 @@ def list_orders():
             status_code=503,
             detail="Database unavailable",
         )
-
 
 @app.post("/orders", status_code=201)
 def create_order(order: OrderCreate):
@@ -263,7 +250,6 @@ def create_order(order: OrderCreate):
             detail="Database unavailable",
         )
 
-
 @app.get("/orders/{order_id}")
 def get_order(order_id: uuid.UUID):
     def _op():
@@ -292,7 +278,6 @@ def get_order(order_id: uuid.UUID):
             status_code=503,
             detail="Database unavailable",
         )
-
 
 @app.put("/orders/{order_id}")
 def update_order(
@@ -341,7 +326,6 @@ def update_order(
             status_code=503,
             detail="Database unavailable",
         )
-
 
 @app.delete("/orders/{order_id}", status_code=204)
 def delete_order(order_id: uuid.UUID):
