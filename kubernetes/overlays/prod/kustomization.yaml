@@ -15,9 +15,9 @@ images:
   - name: payment-service
     newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/payment-service
     newTag: latest
-  - name: rca-api
-    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/rca-api
-    newTag: latest
+  # - name: rca-api
+  #   newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/rca-api
+  #   newTag: latest
 
 patches:
   - patch: |-
