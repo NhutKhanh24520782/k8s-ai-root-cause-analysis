@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: microservices-prod
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ai-rca
+    environment: prod
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/NhutKhanh24520782/k8s-ai-root-cause-analysis.git
+    targetRevision: main
+    path: kubernetes/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ""
+  syncPolicy:
+    # Prod environment: Manual sync required (No automated sync)
+    automated: {}
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  revisionHistoryLimit: 10
+

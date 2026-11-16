@@ -58,12 +58,33 @@ def main():
         return
 
     print(f"[*] Executing CPU load on pod {pod} for {args.duration}s with {args.workers} workers...")
-    stress_cmd = (
-        f"python3 -c \"import time, multiprocessing; "
-        f"def f(): t=time.time()+{args.duration}; [x*x for x in iter(lambda: time.time()<t, False)]; "
-        f"[multiprocessing.Process(target=f).start() for _ in range({args.workers})]\""
+    
+    stress_script = f"""
+import multiprocessing
+import time
+
+def cpu_burn(duration):
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        _ = 104729 * 104729
+
+if __name__ == '__main__':
+    procs = []
+    for _ in range({args.workers}):
+        p = multiprocessing.Process(target=cpu_burn, args=({args.duration},))
+        p.start()
+        procs.append(p)
+    for p in procs:
+        p.join()
+"""
+
+    # Pass script directly via stdin (-i) to completely avoid shell quote escaping issues on Windows
+    subprocess.run(
+        ["kubectl", "exec", "-i", "-n", args.namespace, pod, "--", "python3"],
+        input=stress_script,
+        text=True,
+        check=False,
     )
-    subprocess.run(["kubectl", "exec", "-n", args.namespace, pod, "--", "sh", "-c", stress_cmd], check=False)
     print("[OK] Finished.")
 
 

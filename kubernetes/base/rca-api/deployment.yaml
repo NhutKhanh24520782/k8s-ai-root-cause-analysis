@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-api
+  namespace: ml-stack
+  labels:
+    app: rca-api
+    app.kubernetes.io/name: rca-api
+    app.kubernetes.io/part-of: ai-rca
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-api
+  template:
+    metadata:
+      labels:
+        app: rca-api
+        app.kubernetes.io/name: rca-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: rca-api
+          image: rca-api:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: MODEL_DIR
+              value: "/app/ml/models"
+            - name: CONFIDENCE_THRESHOLD
+              value: "0.65"
+            - name: BUFFER_SIZE
+              value: "20"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+

@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base manifests for all microservices and ML serving API
+resources:
+  - api-gateway/deployment.yaml
+  - api-gateway/service.yaml
+  - order-service/deployment.yaml
+  - order-service/service.yaml
+  - payment-service/deployment.yaml
+  - payment-service/service.yaml
+  - rca-api/deployment.yaml
+  - rca-api/service.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: argocd
+  app.kubernetes.io/part-of: ai-rca
+

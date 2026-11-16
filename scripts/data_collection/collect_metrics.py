@@ -20,25 +20,78 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-# Standard Prometheus query definitions using [2m] rate window to avoid noise with 30s scrape interval
 METRICS_QUERIES = {
-    "request_rate_per_svc": 'sum by (job) (rate(http_requests_total[2m]))',
-    "error_rate_per_svc": 'sum by (job) (rate(http_requests_total{status=~"5.."}[2m]))',
-    "p95_latency_per_svc": (
-        'histogram_quantile(0.95, sum by (job, le) '
-        '(rate(http_request_duration_seconds_bucket[2m])))'
+    "gw_request_rate": (
+        'sum(rate(http_requests_total{service="api-gateway"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*api-gateway.*"}[1m])) or vector(0)'
     ),
-    "cpu_usage_per_svc": 'rate(process_cpu_seconds_total[2m])',
-    "memory_usage_per_svc": 'process_resident_memory_bytes',
-    "pod_restart_count": 'kube_pod_container_status_restarts_total',
-    "db_query_latency_p95": 'histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[2m]))',
-    "db_connection_count": 'db_connection_pool_active',
-}
-
-SERVICES = {
-    "api-gateway": "gw",
-    "order-service": "order",
-    "payment-service": "payment",
+    "gw_error_rate": (
+        '(sum(rate(http_requests_total{service="api-gateway",status=~"5.."}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*api-gateway.*",status=~"5.."}[1m])) or vector(0)) '
+        '/ clamp_min((sum(rate(http_requests_total{service="api-gateway"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*api-gateway.*"}[1m])) or vector(0.001)), 0.001)'
+    ),
+    "gw_p95_latency": (
+        'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="api-gateway"}[1m]))) * 1000 '
+        'or histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~".*api-gateway.*"}[1m]))) * 1000 '
+        'or vector(0)'
+    ),
+    "order_request_rate": (
+        'sum(rate(http_requests_total{service="order-service"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*order-service.*"}[1m])) or vector(0)'
+    ),
+    "order_error_rate": (
+        '(sum(rate(http_requests_total{service="order-service",status=~"5.."}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*order-service.*",status=~"5.."}[1m])) or vector(0)) '
+        '/ clamp_min((sum(rate(http_requests_total{service="order-service"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*order-service.*"}[1m])) or vector(0.001)), 0.001)'
+    ),
+    "order_p95_latency": (
+        'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="order-service"}[1m]))) * 1000 '
+        'or histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~".*order-service.*"}[1m]))) * 1000 '
+        'or vector(0)'
+    ),
+    "order_cpu": (
+        'sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{container="order-service"}) '
+        'or sum(rate(container_cpu_usage_seconds_total{container="order-service"}[1m])) '
+        'or sum(rate(process_cpu_seconds_total{job=~".*order-service.*"}[1m])) or vector(0)'
+    ),
+    "order_mem": (
+        'sum(container_memory_working_set_bytes{container="order-service"}) / 1048576 '
+        'or sum(process_resident_memory_bytes{job=~".*order-service.*"}) / 1048576 or vector(0)'
+    ),
+    "payment_request_rate": (
+        'sum(rate(http_requests_total{service="payment-service"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*payment-service.*"}[1m])) or vector(0)'
+    ),
+    "payment_error_rate": (
+        '(sum(rate(http_requests_total{service="payment-service",status=~"5.."}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*payment-service.*",status=~"5.."}[1m])) or vector(0)) '
+        '/ clamp_min((sum(rate(http_requests_total{service="payment-service"}[1m])) '
+        'or sum(rate(http_requests_total{job=~".*payment-service.*"}[1m])) or vector(0.001)), 0.001)'
+    ),
+    "payment_p95_latency": (
+        'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="payment-service"}[1m]))) * 1000 '
+        'or histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~".*payment-service.*"}[1m]))) * 1000 '
+        'or vector(0)'
+    ),
+    "payment_cpu": (
+        'sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{container="payment-service"}) '
+        'or sum(rate(container_cpu_usage_seconds_total{container="payment-service"}[1m])) '
+        'or sum(rate(process_cpu_seconds_total{job=~".*payment-service.*"}[1m])) or vector(0)'
+    ),
+    "payment_mem": (
+        'sum(container_memory_working_set_bytes{container="payment-service"}) / 1048576 '
+        'or sum(process_resident_memory_bytes{job=~".*payment-service.*"}) / 1048576 or vector(0)'
+    ),
+    "db_query_latency_p95": (
+        'histogram_quantile(0.95, sum by (le) (rate(db_query_duration_seconds_bucket[1m]))) * 1000 '
+        'or histogram_quantile(0.95, sum by (le) (rate(db_query_duration_seconds_bucket[2m]))) * 1000 '
+        'or vector(0)'
+    ),
+    "db_connection_count": (
+        'sum(pg_stat_activity_count) or vector(0)'
+    ),
 }
 
 FIELDS = [
@@ -63,28 +116,25 @@ FIELDS = [
 ]
 
 
-def query_prometheus(prometheus_url: str, query: str) -> dict:
-    url = f"{prometheus_url.rstrip('/')}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+def query_prometheus_scalar(prometheus_url: str, query: str) -> float:
+    encoded = urllib.parse.urlencode({"query": query})
+    url = f"{prometheus_url.rstrip('/')}/api/v1/query?{encoded}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "AIOps-Collector/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            payload = json.load(response)
+        with urllib.request.urlopen(req, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
 
         if payload.get("status") != "success":
-            return {}
+            return 0.0
 
-        results = {}
-        for item in payload.get("data", {}).get("result", []):
-            job = item.get("metric", {}).get("job")
-            if job:
-                try:
-                    results[job] = float(item["value"][1])
-                except (ValueError, TypeError, IndexError):
-                    pass
-        return results
-    except Exception as exc:
-        print(f"[WARN] Query failed for '{query}': {exc}", file=sys.stderr)
-        return {}
+        results = payload.get("data", {}).get("result", [])
+        if not results:
+            return 0.0
+
+        val = results[0].get("value", [0, 0])[1]
+        return float(val) if val not in ("NaN", "Inf", "-Inf") else 0.0
+    except Exception:
+        return 0.0
 
 
 def collect_snapshot(prometheus_url: str, fault_type: str, run_id: str) -> dict:
@@ -94,34 +144,9 @@ def collect_snapshot(prometheus_url: str, fault_type: str, run_id: str) -> dict:
         "fault_type": fault_type,
     }
 
-    requests = query_prometheus(prometheus_url, METRICS_QUERIES["request_rate_per_svc"])
-    errors = query_prometheus(prometheus_url, METRICS_QUERIES["error_rate_per_svc"])
-    p95 = query_prometheus(prometheus_url, METRICS_QUERIES["p95_latency_per_svc"])
-    cpu = query_prometheus(prometheus_url, METRICS_QUERIES["cpu_usage_per_svc"])
-    memory = query_prometheus(prometheus_url, METRICS_QUERIES["memory_usage_per_svc"])
-
-    for job, prefix in SERVICES.items():
-        req_rate = requests.get(job, 0.0)
-        err_rate = errors.get(job, 0.0)
-        lat = p95.get(job, 0.0)
-        c = cpu.get(job, 0.0)
-        m = memory.get(job, 0.0)
-
-        row[f"{prefix}_request_rate"] = round(req_rate, 6) if req_rate is not None else 0.0
-        row[f"{prefix}_error_rate"] = (
-            round(err_rate / req_rate, 6) if req_rate and req_rate > 0 else 0.0
-        )
-        row[f"{prefix}_p95_latency"] = round(lat * 1000.0, 3) if lat is not None else 0.0
-
-        if prefix != "gw":
-            row[f"{prefix}_cpu"] = round(c, 6) if c is not None else 0.0
-            row[f"{prefix}_mem"] = round(m / (1024 * 1024), 3) if m is not None else 0.0
-
-    # Database metrics
-    db_lat = query_prometheus(prometheus_url, METRICS_QUERIES["db_query_latency_p95"])
-    db_conn = query_prometheus(prometheus_url, METRICS_QUERIES["db_connection_count"])
-    row["db_query_latency_p95"] = round(list(db_lat.values())[0] * 1000, 3) if db_lat else 1.2
-    row["db_connection_count"] = round(list(db_conn.values())[0], 1) if db_conn else 5.0
+    for metric_name, query in METRICS_QUERIES.items():
+        val = query_prometheus_scalar(prometheus_url, query)
+        row[metric_name] = round(val, 4)
 
     return row
 
@@ -159,7 +184,10 @@ def main():
             row = collect_snapshot(args.prometheus, args.fault, run_id)
             append_row(args.output, row)
             samples += 1
-            print(f"[{samples}] {row['timestamp']} | run={run_id} | fault={row['fault_type']} | gw_req={row['gw_request_rate']} | order_cpu={row.get('order_cpu')}")
+            print(f"[{samples:3d}] {row['timestamp'][:19]} | {run_id} | {row['fault_type']:15s} | "
+                  f"gw_req={row['gw_request_rate']:5.1f} | gw_err={row['gw_error_rate']:4.2f} | "
+                  f"pay_err={row['payment_error_rate']:4.2f} | order_cpu={row['order_cpu']:.3f} | "
+                  f"db_p95={row['db_query_latency_p95']:.1f}ms")
         except Exception as e:
             print(f"[ERR] Failed to collect: {e}")
 
