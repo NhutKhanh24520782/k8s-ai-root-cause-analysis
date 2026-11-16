@@ -36,8 +36,8 @@ jobs:
       - name: Compile microservice source
         run: python -m compileall -q microservices/services
 
-      - name: Compile RCA API source
-        run: python -m compileall -q rca-api/app || true
+      # - name: Compile RCA API source
+      #   run: python -m compileall -q rca-api/app || true
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 2a. BUILD ONLY (Pull Request) — verify Dockerfiles without pushing to ECR
@@ -62,9 +62,9 @@ jobs:
           - service: payment-service
             context: microservices/services/payment-service
             dockerfile: microservices/services/payment-service/Dockerfile
-          - service: rca-api
-            context: .
-            dockerfile: rca-api/Dockerfile
+          # - service: rca-api
+          #   context: .
+          #   dockerfile: rca-api/Dockerfile
 
     steps:
       - uses: actions/checkout@v4
@@ -108,9 +108,9 @@ jobs:
           - service: payment-service
             context: microservices/services/payment-service
             dockerfile: microservices/services/payment-service/Dockerfile
-          - service: rca-api
-            context: .
-            dockerfile: rca-api/Dockerfile
+          # - service: rca-api
+          #   context: .
+          #   dockerfile: rca-api/Dockerfile
 
     steps:
       - uses: actions/checkout@v4
@@ -216,7 +216,7 @@ jobs:
             | api-gateway | `${{ steps.login-ecr.outputs.registry }}/api-gateway:${{ steps.tag.outputs.value }}` |
             | order-service | `${{ steps.login-ecr.outputs.registry }}/order-service:${{ steps.tag.outputs.value }}` |
             | payment-service | `${{ steps.login-ecr.outputs.registry }}/payment-service:${{ steps.tag.outputs.value }}` |
-            | rca-api | `${{ steps.login-ecr.outputs.registry }}/rca-api:${{ steps.tag.outputs.value }}` |
+            # | rca-api | `${{ steps.login-ecr.outputs.registry }}/rca-api:${{ steps.tag.outputs.value }}` |
 
             ---
             *To deploy this release to EKS, trigger the **[CD — Approve & Promote](${{ github.server_url }}/${{ github.repository }}/actions/workflows/cd-approve.yml)** workflow.*

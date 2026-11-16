@@ -13,7 +13,7 @@ on:
           - api-gateway
           - order-service
           - payment-service
-          - rca-api
+          # - rca-api
 
       image_tag:
         description: "Release Tag to deploy (e.g. v1.0.1)"
@@ -81,7 +81,7 @@ jobs:
           TAG="${{ inputs.image_tag }}"
           SERVICES_TO_CHECK=()
           if [ "${{ inputs.service }}" = "all" ]; then
-            SERVICES_TO_CHECK=(api-gateway order-service payment-service rca-api)
+            SERVICES_TO_CHECK=(api-gateway order-service payment-service) # rca-api
           else
             SERVICES_TO_CHECK=("${{ inputs.service }}")
           fi
@@ -130,7 +130,7 @@ jobs:
           service = "${{ inputs.service }}"
           manifest_path = f"kubernetes/overlays/{env}/kustomization.yaml"
 
-          services = ["api-gateway", "order-service", "payment-service", "rca-api"] if service == "all" else [service]
+          services = ["api-gateway", "order-service", "payment-service"] if service == "all" else [service] # rca-api excluded
 
           with open(manifest_path, "r", encoding="utf-8") as f:
               content = f.read()
