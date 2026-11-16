@@ -1,19 +1,21 @@
 """
 scripts/fault_injection/run_collection_cycle.py
 
-Automates the complete data collection cycle according to Phase A3 specification:
-1. Wait for cluster to stabilize in healthy state (2 min "normal")
-2. Inject fault_type X for duration T (e.g. 5-10 min)
-3. Query Prometheus API to snapshot metrics periodically
-4. Label records with fault_type = X
-5. Restore cluster to normal state
-6. Repeat for next fault scenario
+Automates the complete end-to-end data collection cycle according to Phase A3 specification:
+1. Starts background continuous synthetic traffic generator (5 req/s) so metrics are active.
+2. Waits for cluster baseline stabilization (normal).
+3. Injects fault_type X for duration T (e.g. 3-5 min) with distinct operational signatures.
+4. Collects Prometheus snapshots with unique `run_id`.
+5. Restores cluster to healthy state and allows stabilization.
+6. Loops through all 6 fault scenarios.
+7. Automatically cleans up background traffic generator.
 
 Usage:
-    python scripts/fault_injection/run_collection_cycle.py --scenarios payment_failure,cpu_stress,db_slowness --duration-per-fault 300
+    python scripts/fault_injection/run_collection_cycle.py --cycles 2 --duration-per-fault 180 --gateway http://localhost:8000
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -30,61 +32,93 @@ FAULT_SCRIPTS = {
 def run_injection(fault_type: str, restore: bool = False):
     script = FAULT_SCRIPTS.get(fault_type)
     if not script:
-        print(f"[WARN] No automated script for fault type: {fault_type}")
         return
 
     cmd = [sys.executable, script]
     if restore:
         cmd.append("--restore")
 
-    print(f"[*] {'Restoring' if restore else 'Injecting'} fault '{fault_type}' via {script}...")
+    action = "Restoring" if restore else "Injecting"
+    print(f"[*] {action} fault '{fault_type}' via {script}...")
     subprocess.run(cmd, check=False)
 
 
-def collect_metrics_for_duration(fault_type: str, duration: int, output_file: str, prometheus_url: str):
+def collect_metrics_for_duration(fault_type: str, duration: int, output_file: str, prometheus_url: str, run_id: str):
     cmd = [
         sys.executable,
         "scripts/data_collection/collect_metrics.py",
         "--fault", fault_type,
+        "--run-id", run_id,
         "--duration", str(duration),
         "--prometheus", prometheus_url,
         "--output", output_file,
     ]
-    print(f"[*] Starting metrics collector for {duration}s...")
+    print(f"[*] Running metrics collector: run_id={run_id}, duration={duration}s...")
     subprocess.run(cmd, check=False)
 
 
-def run_full_cycle(scenarios: list, duration_per_fault: int, baseline_wait: int, output_file: str, prometheus_url: str):
-    print("=" * 60)
-    print("Starting Automated AIOps Data Collection Cycle")
+def run_full_cycle(scenarios: list, cycles: int, duration_per_fault: int, baseline_wait: int, output_file: str, prometheus_url: str, gateway_url: str):
+    print("=" * 65)
+    print("AIOps Automated Multi-Cycle Fault Injection & Collection Pipeline")
     print(f"Scenarios: {scenarios}")
-    print(f"Duration per fault: {duration_per_fault}s, Baseline wait: {baseline_wait}s")
-    print("=" * 60)
+    print(f"Cycles: {cycles} | Duration/fault: {duration_per_fault}s | Baseline wait: {baseline_wait}s")
+    print(f"Prometheus URL: {prometheus_url} | Gateway URL: {gateway_url}")
+    print("=" * 65)
 
-    # 1. Initial baseline run
-    print(f"\n[Step 1] Baseline collection ({baseline_wait}s healthy state)...")
-    collect_metrics_for_duration("normal", baseline_wait, output_file, prometheus_url)
+    # 1. Start background continuous traffic generator
+    traffic_proc = None
+    traffic_script = os.path.join("scripts", "data_collection", "traffic_generator.py")
+    if os.path.exists(traffic_script):
+        print(f"[*] Launching background traffic generator targeting {gateway_url}...")
+        traffic_cmd = [
+            sys.executable,
+            traffic_script,
+            "--gateway", gateway_url,
+            "--rate", "5.0",
+        ]
+        traffic_proc = subprocess.Popen(traffic_cmd)
+        time.sleep(5)  # Allow initial requests to register
 
-    for idx, fault in enumerate(scenarios, 1):
-        print(f"\n--- Scenario [{idx}/{len(scenarios)}]: {fault} ---")
+    try:
+        for cycle_idx in range(1, cycles + 1):
+            print(f"\n==================== [CYCLE {cycle_idx}/{cycles}] ====================")
 
-        # 2. Inject fault
-        print(f"[Step 2] Injecting {fault}...")
-        run_injection(fault, restore=False)
+            # Baseline normal collection
+            baseline_run_id = f"run_normal_c{cycle_idx}_{int(time.time())}"
+            print(f"\n[Cycle {cycle_idx} - Step 1] Baseline 'normal' collection ({baseline_wait}s)...")
+            collect_metrics_for_duration("normal", baseline_wait, output_file, prometheus_url, baseline_run_id)
 
-        # 3 & 4. Collect snapshot metrics and label
-        print(f"[Step 3 & 4] Collecting metrics labeled '{fault}' for {duration_per_fault}s...")
-        collect_metrics_for_duration(fault, duration_per_fault, output_file, prometheus_url)
+            # Fault scenarios
+            for step_idx, fault in enumerate(scenarios, 2):
+                run_id = f"run_{fault}_c{cycle_idx}_{int(time.time())}"
+                print(f"\n[Cycle {cycle_idx} - Step {step_idx}] Scenario: {fault} (run_id={run_id})")
 
-        # 5. Restore
-        print(f"[Step 5] Restoring cluster to normal...")
-        run_injection(fault, restore=True)
+                # Inject
+                run_injection(fault, restore=False)
+                print("[*] Waiting 15s for fault propagation in Prometheus rate window...")
+                time.sleep(15)
 
-        # Stabilization period before next fault
-        print(f"[Step 6] Cluster stabilization pause ({baseline_wait}s)...")
-        time.sleep(baseline_wait)
+                # Collect snapshot metrics
+                collect_metrics_for_duration(fault, duration_per_fault, output_file, prometheus_url, run_id)
 
-    print("\n[OK] All collection cycles completed successfully.")
+                # Restore
+                run_injection(fault, restore=True)
+
+                # Stabilization pause
+                print(f"[*] Stabilization pause ({baseline_wait}s)...")
+                time.sleep(baseline_wait)
+
+        print("\n[OK] All data collection cycles completed successfully.")
+
+    finally:
+        if traffic_proc is not None:
+            print("[*] Terminating background traffic generator...")
+            traffic_proc.terminate()
+            try:
+                traffic_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                traffic_proc.kill()
+            print("[OK] Traffic generator stopped.")
 
 
 def main():
@@ -94,14 +128,24 @@ def main():
         default="payment_failure,cpu_stress,db_slowness,memory_leak,network_latency",
         help="Comma-separated fault scenarios",
     )
-    parser.add_argument("--duration-per-fault", type=int, default=300, help="Duration in seconds per fault")
-    parser.add_argument("--baseline-wait", type=int, default=120, help="Baseline wait seconds")
+    parser.add_argument("--cycles", type=int, default=2, help="Number of complete scenario cycles to run")
+    parser.add_argument("--duration-per-fault", type=int, default=180, help="Duration in seconds per fault")
+    parser.add_argument("--baseline-wait", type=int, default=60, help="Baseline wait and stabilization seconds")
     parser.add_argument("--prometheus", default="http://localhost:9090", help="Prometheus URL")
+    parser.add_argument("--gateway", default="http://localhost:8000", help="API Gateway URL")
     parser.add_argument("--output", default="dataset/a3_prometheus_metrics.csv", help="Output CSV path")
     args = parser.parse_args()
 
     scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
-    run_full_cycle(scenarios, args.duration_per_fault, args.baseline_wait, args.output, args.prometheus)
+    run_full_cycle(
+        scenarios=scenarios,
+        cycles=args.cycles,
+        duration_per_fault=args.duration_per_fault,
+        baseline_wait=args.baseline_wait,
+        output_file=args.output,
+        prometheus_url=args.prometheus,
+        gateway_url=args.gateway,
+    )
 
 
 if __name__ == "__main__":

@@ -39,6 +39,45 @@ HTTP_REQUESTS_IN_FLIGHT = Gauge(
     "Number of HTTP requests currently being processed",
 )
 
+DB_QUERY_DURATION = Histogram(
+    "db_query_duration_seconds",
+    "Database query duration in seconds",
+)
+
+DB_CONNECTIONS_ACTIVE = Gauge(
+    "db_connection_pool_active",
+    "Active database connections in pool",
+)
+
+# ==========================================
+# Application configuration & Fault Simulation
+# ==========================================
+
+SIMULATE_DB_DELAY = (
+    os.getenv("SIMULATE_DB_DELAY", "false").lower() in {"true", "1", "yes"}
+    or os.getenv("FAULT_TYPE", "").lower() == "db_slowness"
+)
+DB_DELAY_MS = float(os.getenv("DB_DELAY_MS", "500"))
+
+SIMULATE_CPU_STRESS = (
+    os.getenv("SIMULATE_CPU_STRESS", "false").lower() in {"true", "1", "yes"}
+    or os.getenv("FAULT_TYPE", "").lower() == "cpu_stress"
+    or os.getenv("FAULT_CPU_STRESS", "false").lower() in {"true", "1", "yes"}
+)
+
+
+def execute_with_db_metrics(operation_fn):
+    DB_CONNECTIONS_ACTIVE.inc()
+    start_time = time.perf_counter()
+    try:
+        if SIMULATE_DB_DELAY:
+            time.sleep(DB_DELAY_MS / 1000.0)
+        return operation_fn()
+    finally:
+        duration = time.perf_counter() - start_time
+        DB_QUERY_DURATION.observe(duration)
+        DB_CONNECTIONS_ACTIVE.dec()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -100,6 +139,12 @@ class OrderUpdate(BaseModel):
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
     start_time = time.perf_counter()
+
+    # Fault simulation: CPU Stress on request
+    if SIMULATE_CPU_STRESS:
+        burn_end = time.perf_counter() + 0.15
+        while time.perf_counter() < burn_end:
+            _ = 999999 ** 2
 
     method = request.method
     handler = request.url.path
@@ -176,14 +221,15 @@ def serialize_order(row):
 
 @app.get("/orders")
 def list_orders():
-    try:
+    def _op():
         with engine.connect() as connection:
             rows = connection.execute(
                 text("SELECT * FROM orders ORDER BY id")
             ).fetchall()
-
         return [serialize_order(row) for row in rows]
 
+    try:
+        return execute_with_db_metrics(_op)
     except SQLAlchemyError:
         raise HTTPException(
             status_code=503,
@@ -194,7 +240,8 @@ def list_orders():
 @app.post("/orders", status_code=201)
 def create_order(order: OrderCreate):
     order_id = uuid.uuid4()
-    try:
+
+    def _op():
         with engine.begin() as connection:
             row = connection.execute(
                 text("""
@@ -204,15 +251,16 @@ def create_order(order: OrderCreate):
                 """),
                 {**order.model_dump(), "order_id": str(order_id)},
             ).fetchone()
+        return row
 
-            if row is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Order not found",
-                )
-
+    try:
+        row = execute_with_db_metrics(_op)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
         return serialize_order(row)
-
     except SQLAlchemyError:
         raise HTTPException(
             status_code=503,
@@ -222,15 +270,18 @@ def create_order(order: OrderCreate):
 
 @app.get("/orders/{order_id}")
 def get_order(order_id: uuid.UUID):
-    try:
+    def _op():
         with engine.connect() as connection:
-            row = connection.execute(
+            return connection.execute(
                 text("""
                     SELECT * FROM orders
                     WHERE order_id = :order_id
                 """),
                 {"order_id": order_id},
             ).fetchone()
+
+    try:
+        row = execute_with_db_metrics(_op)
 
         if row is None:
             raise HTTPException(

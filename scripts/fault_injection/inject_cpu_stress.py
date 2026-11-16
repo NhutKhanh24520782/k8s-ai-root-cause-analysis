@@ -39,25 +39,32 @@ def main():
     args = parser.parse_args()
 
     if args.restore:
-        print(f"[*] Removing CPU stress env flags from {args.service}...")
+        print(f"[*] Removing CPU stress flags from {args.service}...")
         subprocess.run([
             "kubectl", "-n", args.namespace, "set", "env",
-            f"deployment/{args.service}", "FAULT_TYPE=normal", "FAULT_CPU_STRESS=false"
+            f"deployment/{args.service}",
+            "FAULT_TYPE=normal",
+            "FAULT_CPU_STRESS=false",
+            "SIMULATE_CPU_STRESS=false",
         ], check=False)
         return
+
+    # 1. Patch deployment env var for persistent CPU load on requests
+    print(f"[*] Patching deployment/{args.service} with SIMULATE_CPU_STRESS=true...")
+    subprocess.run([
+        "kubectl", "-n", args.namespace, "set", "env",
+        f"deployment/{args.service}",
+        "FAULT_TYPE=cpu_stress",
+        "FAULT_CPU_STRESS=true",
+        "SIMULATE_CPU_STRESS=true",
+    ], check=False)
 
     pod = get_pod_name(args.namespace, args.service)
     if not pod:
-        print(f"[!] Pod for {args.service} not found in namespace {args.namespace}.")
-        # Alternate path: set env var on deployment
-        print(f"[*] Fallback: patching deployment/{args.service} with FAULT_TYPE=cpu_stress...")
-        subprocess.run([
-            "kubectl", "-n", args.namespace, "set", "env",
-            f"deployment/{args.service}", "FAULT_TYPE=cpu_stress", "FAULT_CPU_STRESS=true"
-        ], check=False)
+        print(f"[*] Deployment patched. Pod name not immediately resolved, will take effect on rollout.")
         return
 
-    print(f"[*] Executing CPU load on pod {pod} for {args.duration}s with {args.workers} workers...")
+    print(f"[*] Executing direct CPU load on pod {pod} for {args.duration}s with {args.workers} workers...")
     stress_cmd = (
         f"python3 -c \"import time, multiprocessing; "
         f"def f(): t=time.time()+{args.duration}; [x*x for x in iter(lambda: time.time()<t, False)]; "

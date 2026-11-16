@@ -61,13 +61,23 @@ PAYMENT_ATTEMPTS = Counter(
 
 
 # ==========================================
-# Application configuration
+# Application configuration & Fault Simulation
 # ==========================================
 
+import random
+
 SIMULATE_FAILURE = (
-    os.getenv("SIMULATE_PAYMENT_FAILURE", "false").lower()
-    in {"true", "1", "yes"}
+    os.getenv("SIMULATE_PAYMENT_FAILURE", "false").lower() in {"true", "1", "yes"}
+    or os.getenv("FAULT_TYPE", "").lower() == "payment_failure"
 )
+FAULT_PROBABILITY = float(os.getenv("FAULT_PROBABILITY", "0.85"))
+
+SIMULATE_MEMORY_LEAK = (
+    os.getenv("SIMULATE_MEMORY_LEAK", "false").lower() in {"true", "1", "yes"}
+    or os.getenv("FAULT_TYPE", "").lower() == "memory_leak"
+)
+MEMORY_LEAK_RATE_MB = int(os.getenv("MEMORY_LEAK_RATE_MB", "15"))
+_LEAK_BUFFER = []
 
 ORDER_SERVICE_URL = os.getenv(
     "ORDER_SERVICE_URL",
@@ -156,6 +166,13 @@ class PaymentUpdate(BaseModel):
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
     start_time = time.perf_counter()
+
+    # Fault simulation: Progressive memory leak
+    if SIMULATE_MEMORY_LEAK:
+        try:
+            _LEAK_BUFFER.append(bytearray(1024 * 1024 * MEMORY_LEAK_RATE_MB))
+        except MemoryError:
+            pass
 
     method = request.method
     handler = request.url.path
@@ -270,53 +287,19 @@ async def validate_order(order_id: uuid.UUID) -> None:
 @app.post("/payments", status_code=201)
 async def create_payment(payment: PaymentRequest):
     PAYMENT_ATTEMPTS.inc()
-    await validate_order(payment.order_id)
-    payment_id = uuid.uuid4()
-    status = "failed" if SIMULATE_FAILURE else "succeeded"
 
-    try:
-        with engine.begin() as connection:
-            row = connection.execute(
-                text("""
-                    INSERT INTO payments (
-                        payment_id,
-                        order_id,
-                        amount,
-                        currency,
-                        status
-                    )
-                    VALUES (
-                        :payment_id,
-                        :order_id,
-                        :amount,
-                        :currency,
-                        :status
-                    )
-                    RETURNING *
-                """),
-                {
-                    **payment.model_dump(), "payment_id": str(payment_id), "status": status,
-                },
-            ).fetchone()
-
-        return serialize_payment(row)
-
-    except SQLAlchemyError:
+    # Fault Simulation: Return HTTP 500 when failure injection is active
+    if SIMULATE_FAILURE and random.random() < FAULT_PROBABILITY:
         raise HTTPException(
-            status_code=503,
-            detail="Payment database unavailable",
+            status_code=500,
+            detail="Simulated Payment Gateway Service Exception (500 Internal Error)",
         )
-
-
-@app.post("/payments", status_code=201)
-async def create_payment(payment: PaymentRequest):
-    PAYMENT_ATTEMPTS.inc()
 
     # Xác minh đơn hàng trước khi tạo payment.
     await validate_order(payment.order_id)
 
     payment_id = uuid.uuid4()
-    status = "failed" if SIMULATE_FAILURE else "succeeded"
+    status = "succeeded"
 
     try:
         with engine.begin() as connection:

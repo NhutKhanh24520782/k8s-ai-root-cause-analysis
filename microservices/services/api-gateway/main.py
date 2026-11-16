@@ -41,6 +41,15 @@ PAYMENT_SERVICE_URL = os.getenv(
     "http://payment-service:8002",
 )
 
+# ==========================================
+# Fault simulation configuration
+# ==========================================
+SIMULATE_NETWORK_LATENCY = (
+    os.getenv("SIMULATE_NETWORK_LATENCY", "false").lower() in {"true", "1", "yes"}
+    or os.getenv("FAULT_TYPE", "").lower() == "network_latency"
+)
+NETWORK_LATENCY_MS = float(os.getenv("NETWORK_LATENCY_MS", "200"))
+
 
 
 @app.middleware("http")
@@ -93,6 +102,9 @@ async def proxy_request(
     service_url: str,
     path: str,
 ):
+    if SIMULATE_NETWORK_LATENCY:
+        time.sleep(NETWORK_LATENCY_MS / 1000.0)
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.request(

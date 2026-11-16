@@ -31,8 +31,8 @@ def run_cmd(cmd: list) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="Inject or restore network latency.")
     parser.add_argument("--namespace", default="microservices")
-    parser.add_argument("--service", default="order-service")
-    parser.add_argument("--delay-ms", type=int, default=200, help="Added latency in ms")
+    parser.add_argument("--service", default="api-gateway")
+    parser.add_argument("--delay-ms", type=int, default=250, help="Added latency in ms")
     parser.add_argument("--restore", action="store_true", help="Restore normal latency")
     args = parser.parse_args()
 
@@ -41,6 +41,7 @@ def main():
         cmd = [
             "kubectl", "-n", args.namespace, "set", "env",
             f"deployment/{args.service}",
+            "SIMULATE_NETWORK_LATENCY=false",
             "NETWORK_LATENCY_MS=0",
             "FAULT_TYPE=normal",
         ]
@@ -49,6 +50,7 @@ def main():
         cmd = [
             "kubectl", "-n", args.namespace, "set", "env",
             f"deployment/{args.service}",
+            "SIMULATE_NETWORK_LATENCY=true",
             f"NETWORK_LATENCY_MS={args.delay_ms}",
             "FAULT_TYPE=network_latency",
         ]

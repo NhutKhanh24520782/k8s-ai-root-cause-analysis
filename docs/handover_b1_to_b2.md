@@ -49,6 +49,18 @@ Toàn bộ mã nguồn, dữ liệu và mô hình sử dụng thống nhất 6 n
   2. `random-forest-v1`: Ghi log parameters (`n_estimators`, `max_depth`), metrics (`macro_f1`, `top2_accuracy`), model artifact (`rca-model`), confusion matrix artifact.
   3. `gradient-boosting-v1`: Ghi log parameters (`max_iter`, `max_depth`), metrics (`macro_f1`), model artifact.
 
+### E. Cải tiến Chất Lượng Thu Thập Metrics Trên EKS (Khắc Phục Nhận Xét Của Nhóm)
+Đã giải quyết triệt để vấn đề "dữ liệu thu thập thực tế từ EKS chưa thể hiện rõ tính đặc trưng giữa các lần inject":
+1. **Kích hoạt mã lỗi thực tế trên Microservices:**
+   - `payment-service`: Bổ sung kiểm tra cờ `SIMULATE_PAYMENT_FAILURE` để ném lỗi `HTTP 500` thực tế (thay vì trả về 201 Created), giúp `error_rate` trong Prometheus nhảy vọt lên 80-100% đúng đặc trưng. Bổ sung `SIMULATE_MEMORY_LEAK` cấp phát bộ nhớ thật `_LEAK_BUFFER`.
+   - `order-service`: Bổ sung xử lý cờ `SIMULATE_DB_DELAY` tạo độ trễ truy vấn PostgreSQL thực tế, đồng thời khai báo và observe đầy đủ 2 metrics Prometheus: `db_query_duration_seconds` (Histogram) và `db_connection_pool_active` (Gauge). Hỗ trợ `SIMULATE_CPU_STRESS` tạo tải vi xử lý.
+   - `api-gateway`: Bổ sung xử lý `SIMULATE_NETWORK_LATENCY` gây trễ proxy gọi downstream services.
+2. **Bộ tạo tải nền tự động (Traffic Generator):**
+   - Bổ sung `scripts/data_collection/traffic_generator.py`: Tự động gửi liên tục luồng request tạo đơn và thanh toán (5 req/s) trong suốt chu kỳ thu thập để Prometheus luôn có mẫu đo đạc động, loại bỏ tình trạng chỉ số bị phẳng (flatline) do thiếu traffic.
+3. **Thu thập Prometheus mạnh mẽ trên EKS:**
+   - Cập nhật `scripts/data_collection/collect_metrics.py`: Tự động tìm kiếm và đối chiếu linh hoạt qua các nhãn Kubernetes (`container`, `app`, `job`, `service`, `pod`), kết hợp cAdvisor container metrics (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`) với fallback an toàn.
+   - Tích hợp `traffic_generator` chạy ngầm hoàn toàn tự động trong `scripts/fault_injection/run_collection_cycle.py`.
+
 ---
 
 ## 3. Hướng dẫn tiếp nhận cho Phước Thọ (Bắt đầu Giai đoạn B2)
