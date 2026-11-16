@@ -3,6 +3,7 @@ kind: Kustomization
 
 # Base manifests for all microservices and ML serving API
 resources:
+  - namespaces.yaml
   - api-gateway/deployment.yaml
   - api-gateway/service.yaml
   - order-service/deployment.yaml

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: microservices
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  labels:
+    project: ai-rca
+    env: dev
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-stack
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  labels:
+    project: ai-rca
+    env: dev
