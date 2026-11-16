@@ -21,20 +21,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 
-# ==========================================
-# Database configuration
-# ==========================================
-
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
 )
-
-# ==========================================
-# Prometheus metrics
-# ==========================================
 
 HTTP_REQUESTS = Counter(
     "http_requests_total",
@@ -57,12 +49,6 @@ PAYMENT_ATTEMPTS = Counter(
     "payment_attempts_total",
     "Total payment attempts",
 )
-
-
-
-# ==========================================
-# Application configuration & Fault Simulation
-# ==========================================
 
 import random
 
@@ -88,8 +74,6 @@ ORDER_SERVICE_URL = os.getenv(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     last_error = None
-
-    # Wait for PostgreSQL to become available.
     for _ in range(20):
         try:
             with engine.begin() as connection:
@@ -129,11 +113,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# ==========================================
-# Request models
-# ==========================================
-
 class PaymentRequest(BaseModel):
     order_id: uuid.UUID
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
@@ -158,16 +137,10 @@ class PaymentUpdate(BaseModel):
         pattern=r"^(pending|succeeded|failed|cancelled)$",
     )
 
-
-# ==========================================
-# Prometheus middleware
-# ==========================================
-
 @app.middleware("http")
 async def prometheus_middleware(request: Request, call_next):
     start_time = time.perf_counter()
 
-    # Fault simulation: Progressive memory leak
     if SIMULATE_MEMORY_LEAK:
         try:
             _LEAK_BUFFER.append(bytearray(1024 * 1024 * MEMORY_LEAK_RATE_MB))
@@ -188,7 +161,6 @@ async def prometheus_middleware(request: Request, call_next):
     finally:
         duration = time.perf_counter() - start_time
 
-        # Prefer route templates to avoid high-cardinality labels.
         route = request.scope.get("route")
         if route is not None:
             handler = getattr(route, "path", handler)
@@ -206,10 +178,6 @@ async def prometheus_middleware(request: Request, call_next):
 
         HTTP_REQUESTS_IN_FLIGHT.dec()
 
-
-# ==========================================
-# Health and readiness
-# ==========================================
 
 @app.get("/health")
 def health():
@@ -255,10 +223,6 @@ def serialize_payment(row):
     return result
 
 
-# ==========================================
-# Payment endpoints
-# ==========================================
-
 async def validate_order(order_id: uuid.UUID) -> None:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -287,15 +251,12 @@ async def validate_order(order_id: uuid.UUID) -> None:
 @app.post("/payments", status_code=201)
 async def create_payment(payment: PaymentRequest):
     PAYMENT_ATTEMPTS.inc()
-
-    # Fault Simulation: Return HTTP 500 when failure injection is active
     if SIMULATE_FAILURE and random.random() < FAULT_PROBABILITY:
         raise HTTPException(
             status_code=500,
             detail="Simulated Payment Gateway Service Exception (500 Internal Error)",
         )
 
-    # Xác minh đơn hàng trước khi tạo payment.
     await validate_order(payment.order_id)
 
     payment_id = uuid.uuid4()
