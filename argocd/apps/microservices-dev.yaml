@@ -12,7 +12,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/NhutKhanh24520782/k8s-ai-root-cause-analysis.git
-    targetRevision: main
+    targetRevision: feat/gitops
     path: kubernetes/overlays/dev
   destination:
     server: https://kubernetes.default.svc

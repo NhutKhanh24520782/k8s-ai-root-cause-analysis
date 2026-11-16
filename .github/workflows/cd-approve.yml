@@ -61,6 +61,13 @@ jobs:
           echo "::error ::Deployment aborted. Confirmation checkbox must be checked."
           exit 1
 
+      - name: Verify target branch
+        run: |
+          if [ "$GITHUB_REF_NAME" != "feat/gitops" ]; then
+            echo "::error::Only feat/gitops is allowed during testing."
+            exit 1
+          fi
+
       - name: Validate semver format
         run: |
           TAG="${{ inputs.image_tag }}"
@@ -148,6 +155,12 @@ jobs:
       - name: Display updated manifest
         run: cat kubernetes/overlays/${{ inputs.environment }}/kustomization.yaml
 
+      - name: Validate Kustomize Build
+        run: |
+          kubectl kustomize kubernetes/overlays/${{ inputs.environment }} \
+            > /tmp/rendered-manifests.yaml
+          echo "Kustomize build successful."
+
       - name: Commit and push manifest
         run: |
           TAG="${{ inputs.image_tag }}"
@@ -162,7 +175,7 @@ jobs:
 
           Approved by: @${{ github.actor }}
           Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            git push origin ${{ env.TARGET_BRANCH }}
+            git push origin "$TARGET_BRANCH"
             echo "✅ Successfully pushed manifest update. ArgoCD will now sync to EKS."
           fi
 
