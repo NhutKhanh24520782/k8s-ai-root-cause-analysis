@@ -1,0 +1,195 @@
+name: CD — Approve & Promote (Dispatch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to promote"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - api-gateway
+          - order-service
+          - payment-service
+          # - rca-api
+
+      image_tag:
+        description: "Release Tag to deploy (e.g. v1.0.1)"
+        required: true
+        type: string
+
+      environment:
+        description: "Target Environment"
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+      confirm:
+        description: "Check to confirm release deployment"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TARGET_BRANCH: ${{ github.ref_name }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. VALIDATE INPUTS & ECR IMAGES
+  # ─────────────────────────────────────────────────────────────────────────────
+  validate-inputs:
+    name: Validate Approval & ECR Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify approval confirmation
+        if: inputs.confirm != true
+        run: |
+          echo "::error ::Deployment aborted. Confirmation checkbox must be checked."
+          exit 1
+
+      - name: Verify target branch
+        run: |
+          if [ "$GITHUB_REF_NAME" != "feat/gitops" ]; then
+            echo "::error::Only feat/gitops is allowed during testing."
+            exit 1
+          fi
+
+      - name: Validate semver format
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error ::Invalid semver format: '${TAG}'. Expected format like v1.0.1"
+            exit 1
+          fi
+          echo "✅ Valid tag format: ${TAG}"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify tag exists in ECR
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          SERVICES_TO_CHECK=()
+          if [ "${{ inputs.service }}" = "all" ]; then
+            SERVICES_TO_CHECK=(api-gateway order-service payment-service) # rca-api
+          else
+            SERVICES_TO_CHECK=("${{ inputs.service }}")
+          fi
+
+          for SVC in "${SERVICES_TO_CHECK[@]}"; do
+            echo "Checking ECR for ${SVC}:${TAG}..."
+            aws ecr describe-images \
+              --repository-name "${SVC}" \
+              --image-ids imageTag="${TAG}" \
+              --region "${{ env.AWS_REGION }}" > /dev/null || {
+              echo "::error ::Image ${SVC}:${TAG} does not exist in ECR. Build it first with CI."
+              exit 1
+            }
+            echo "✅ Verified ${SVC}:${TAG} in ECR."
+          done
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. UPDATE MANIFEST & COMMIT FOR ARGOCD SYNC
+  # ─────────────────────────────────────────────────────────────────────────────
+  promote:
+    name: "Promote to ${{ inputs.environment }}"
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update Kustomize Overlay Image Tags
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+
+          env = "${{ inputs.environment }}"
+          tag = "${{ inputs.image_tag }}"
+          service = "${{ inputs.service }}"
+          manifest_path = f"kubernetes/overlays/{env}/kustomization.yaml"
+
+          services = ["api-gateway", "order-service", "payment-service"] if service == "all" else [service] # rca-api excluded
+
+          with open(manifest_path, "r", encoding="utf-8") as f:
+              content = f.read()
+
+          for svc in services:
+              pattern = rf"(- name:\s*{svc}\s*\n\s*newName:\s*[\S]+\s*\n\s*newTag:\s*)[\S]+"
+              content = re.sub(pattern, rf"\g<1>{tag}", content)
+
+          with open(manifest_path, "w", encoding="utf-8") as f:
+              f.write(content)
+
+          print(f"Updated {manifest_path} with {services} -> newTag: {tag}")
+          EOF
+
+      - name: Display updated manifest
+        run: cat kubernetes/overlays/${{ inputs.environment }}/kustomization.yaml
+
+      - name: Validate Kustomize Build
+        run: |
+          kubectl kustomize kubernetes/overlays/${{ inputs.environment }} \
+            > /tmp/rendered-manifests.yaml
+          echo "Kustomize build successful."
+
+      - name: Commit and push manifest
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          ENV="${{ inputs.environment }}"
+          SVC="${{ inputs.service }}"
+
+          git add kubernetes/overlays/${ENV}/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "No changes: ${SVC} already at tag ${TAG} in ${ENV}."
+          else
+            git commit -m "chore(release): promote ${SVC} to ${TAG} in ${ENV} [skip ci]
+
+          Approved by: @${{ github.actor }}
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            git push origin "$TARGET_BRANCH"
+            echo "✅ Successfully pushed manifest update. ArgoCD will now sync to EKS."
+          fi
+
+      - name: Promotion Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### 🚀 Promotion Approved & Dispatched
+          | Field | Value |
+          |---|---|
+          | Service(s) | \`${{ inputs.service }}\` |
+          | Release Tag | \`${{ inputs.image_tag }}\` |
+          | Target Environment | \`${{ inputs.environment }}\` |
+          | Approved by | @${{ github.actor }} |
+
+          ArgoCD will detect this commit and reconcile changes with EKS automatically.
+          EOF
+
