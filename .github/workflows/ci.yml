@@ -2,9 +2,11 @@ name: CI — Build & Push to ECR (Tag Release)
 
 on:
   push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-*"
+   branches:
+      - main
+      - feat/gitops
+   tags:
+      - "v*"
   pull_request:
     branches: [main]
 
