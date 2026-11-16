@@ -101,13 +101,3 @@ py scripts/data_collection/collect_metrics_prometheus.py --environment eks --fau
 > `kubernetes/microservices/order-service/deployment.yaml` đặt CPU limit là `500m` (0.5 core = 50% của 1 logical core). Khi đo trên EKS, order_cpu tối đa sẽ dao động quanh 50%. Đây là hành vi hoàn toàn chính xác theo cấu hình tài nguyên của Kubernetes.
 
 ---
-
-## 4. Push code lên GitHub
-
-```powershell
-git status
-git add scripts/data_collection/collect_metrics_prometheus.py scripts/fault_injection/inject_cpu_stress.py tests/test_metrics_and_fault.py BAT_DAU_O_DAY.md HUONG_DAN_PUSH_VA_TEST.md
-git diff --cached --stat
-git commit -m "fix: support EKS metrics collection and CPU fault injection"
-git push -u origin feature/dataset-collection
-```
