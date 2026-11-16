@@ -49,10 +49,6 @@ DB_CONNECTIONS_ACTIVE = Gauge(
     "Active database connections in pool",
 )
 
-# ==========================================
-# Application configuration & Fault Simulation
-# ==========================================
-
 SIMULATE_DB_DELAY = (
     os.getenv("SIMULATE_DB_DELAY", "false").lower() in {"true", "1", "yes"}
     or os.getenv("FAULT_TYPE", "").lower() == "db_slowness"
