@@ -40,10 +40,6 @@ PAYMENT_SERVICE_URL = os.getenv(
     "PAYMENT_SERVICE_URL",
     "http://payment-service:8002",
 )
-
-# ==========================================
-# Fault simulation configuration
-# ==========================================
 SIMULATE_NETWORK_LATENCY = (
     os.getenv("SIMULATE_NETWORK_LATENCY", "false").lower() in {"true", "1", "yes"}
     or os.getenv("FAULT_TYPE", "").lower() == "network_latency"
