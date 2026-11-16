@@ -16,7 +16,7 @@ on:
           # - rca-api
 
       image_tag:
-        description: "Release Tag to deploy (e.g. v1.0.1)"
+        description: "Release Tag to deploy (e.g. v1.0.3)"
         required: true
         type: string
 
@@ -69,13 +69,15 @@ jobs:
           fi
 
       - name: Validate semver format
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          TAG="${{ inputs.image_tag }}"
-          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "::error ::Invalid semver format: '${TAG}'. Expected format like v1.0.1"
+          if ! [[ "$IMAGE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Expected format v1.0.3"
             exit 1
           fi
-          echo "✅ Valid tag format: ${TAG}"
+
+          echo "Valid release tag: $IMAGE_TAG"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -84,8 +86,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify tag exists in ECR
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          TAG="${{ inputs.image_tag }}"
           SERVICES_TO_CHECK=()
           if [ "${{ inputs.service }}" = "all" ]; then
             SERVICES_TO_CHECK=(api-gateway order-service payment-service) # rca-api
@@ -94,15 +97,15 @@ jobs:
           fi
 
           for SVC in "${SERVICES_TO_CHECK[@]}"; do
-            echo "Checking ECR for ${SVC}:${TAG}..."
+            echo "Checking ECR for ${SVC}:${IMAGE_TAG}..."
             aws ecr describe-images \
-              --repository-name "${SVC}" \
-              --image-ids imageTag="${TAG}" \
-              --region "${{ env.AWS_REGION }}" > /dev/null || {
-              echo "::error ::Image ${SVC}:${TAG} does not exist in ECR. Build it first with CI."
+              --repository-name "$SVC" \
+              --image-ids imageTag="$IMAGE_TAG" \
+              --region "$AWS_REGION" > /dev/null || {
+              echo "::error ::Image ${SVC}:${IMAGE_TAG} does not exist in ECR. Build it first with CI."
               exit 1
             }
-            echo "✅ Verified ${SVC}:${TAG} in ECR."
+            echo "✅ Verified ${SVC}:${IMAGE_TAG} in ECR."
           done
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -127,14 +130,18 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Update Kustomize Overlay Image Tags
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          TARGET_ENV: ${{ inputs.environment }}
+          TARGET_SERVICE: ${{ inputs.service }}
         run: |
           python3 - << 'EOF'
           import os
           import re
 
-          env = "${{ inputs.environment }}"
-          tag = "${{ inputs.image_tag }}"
-          service = "${{ inputs.service }}"
+          env = os.environ["TARGET_ENV"]
+          tag = os.environ["IMAGE_TAG"]
+          service = os.environ["TARGET_SERVICE"]
           manifest_path = f"kubernetes/overlays/{env}/kustomization.yaml"
 
           services = ["api-gateway", "order-service", "payment-service"] if service == "all" else [service] # rca-api excluded
@@ -162,10 +169,14 @@ jobs:
           echo "Kustomize build successful."
 
       - name: Commit and push manifest
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          TARGET_ENV: ${{ inputs.environment }}
+          TARGET_SERVICE: ${{ inputs.service }}
         run: |
-          TAG="${{ inputs.image_tag }}"
-          ENV="${{ inputs.environment }}"
-          SVC="${{ inputs.service }}"
+          TAG="$IMAGE_TAG"
+          ENV="$TARGET_ENV"
+          SVC="$TARGET_SERVICE"
 
           git add kubernetes/overlays/${ENV}/kustomization.yaml
           if git diff --cached --quiet; then
