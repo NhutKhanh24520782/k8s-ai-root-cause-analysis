@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rca-api
+  namespace: ml-stack
+  labels:
+    app: rca-api
+    app.kubernetes.io/name: rca-api
+    app.kubernetes.io/part-of: ai-rca
+spec:
+  selector:
+    app: rca-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+

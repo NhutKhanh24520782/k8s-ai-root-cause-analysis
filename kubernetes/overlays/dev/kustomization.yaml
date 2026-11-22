@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ── Overlay: dev ───────────────────────────────────────────────────────────────
+# This file is automatically updated by the CD Approve & Promote workflow
+# (.github/workflows/cd-approve.yml) when a release tag (e.g. v1.0.1) is dispatched.
+
+resources:
+  - ../../base
+
+images:
+  - name: api-gateway
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/api-gateway
+    newTag: v1.0.7
+  - name: order-service
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/order-service
+    newTag: v1.0.7
+  - name: payment-service
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/payment-service
+    newTag: v1.0.7
+  # - name: rca-api
+  #   newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/rca-api
+  #   newTag: latest
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/part-of=ai-rca"
+
