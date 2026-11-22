@@ -10,7 +10,7 @@ Dự án áp dụng triệt để nguyên lý GitOps:
 
 1. **GitHub Actions chỉ làm CI:**
    - Kích hoạt khi Developer push một Git Tag (vd: `v1.0.1`).
-   - Kiểm tra syntax, chạy test, build Docker image cho 3 microservices nghiệp vụ (`api-gateway`, `order-service`, `payment-service`). *(Lưu ý: `rca-api` tạm thời được bỏ qua để tập trung hoàn thiện pipeline core services trước).*
+   - Kiểm tra syntax, chạy test, build Docker image cho 4 dịch vụ (`api-gateway`, `order-service`, `payment-service`, `rca-api`).
    - Push image lên Amazon ECR với tag định danh `v1.0.1` và `latest`.
    - **Tuyệt đối không can thiệp** vào Kubernetes cluster.
 

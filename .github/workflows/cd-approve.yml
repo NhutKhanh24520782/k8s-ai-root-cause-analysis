@@ -16,7 +16,7 @@ on:
           # - rca-api
 
       image_tag:
-        description: "Release Tag to deploy (e.g. v1.0.3)"
+        description: "Release Tag to deploy (e.g. v1.0.1)"
         required: true
         type: string
 
