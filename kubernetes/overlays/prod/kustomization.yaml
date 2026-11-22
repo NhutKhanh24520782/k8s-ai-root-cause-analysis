@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ── Overlay: prod ─────────────────────────────────────────────────────────────
+resources:
+  - ../../base
+
+images:
+  - name: api-gateway
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/api-gateway
+    newTag: latest
+  - name: order-service
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/order-service
+    newTag: latest
+  - name: payment-service
+    newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/payment-service
+    newTag: latest
+  # - name: rca-api
+  #   newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/rca-api
+  #   newTag: latest
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/part-of=ai-rca"
+
