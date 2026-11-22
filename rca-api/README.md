@@ -1,105 +1,88 @@
 # rca-api/
 
-> **Status:** No API source code exists yet.  
-> This README documents the planned FastAPI service design.
+FastAPI service that receives a snapshot of microservice metrics and returns
+the predicted root cause of an incident (phase B2, owner: Phước Thọ — TV4).
 
----
+It reuses the inference code handed over by ML (`ml/src/predict.py`) and the
+request/response contract in `schemas.py` (Interface Contract 2, defined by
+Đình Tân). See `docs/handover_b1_to_b2.md`.
 
-## Purpose
+## Files
 
-This directory will contain the **Root Cause Analysis API**: a FastAPI application that loads the trained ML model from MLflow and serves root-cause predictions over HTTP.
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI app: the 3 endpoints below, loads the model once at startup |
+| `schemas.py` | Pydantic request/response models (owned by ML, do not change alone) |
+| `requirements.txt` | Runtime dependencies (installed in the Docker image) |
+| `requirements-dev.txt` | Runtime + test dependencies (`pytest`, `httpx`) |
+| `tests/test_api.py` | API tests, run against the real trained model |
+| `Dockerfile` | Image definition; build it from the **repository root** |
 
-The API is the user-facing output of the ML pipeline. It receives a set of observability metrics, passes them through the loaded model, and returns the predicted incident root-cause category.
+Kubernetes manifests: `kubernetes/ml-stack/rca-api/`.
 
----
+## Endpoints
 
-## Planned Endpoints
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/health` | `{"status": "ok", "model_version": "1"}` |
+| `POST` | `/predict` | Predicted root cause, confidence, top 3 candidates, evidence |
+| `GET` | `/metrics` | Prometheus metrics of the API itself |
 
-### `GET /health`
+`POST /predict` takes the 15 metrics defined in `MetricSnapshotRequest`
+(`gw_*`, `order_*`, `payment_*`, `db_*`). A request with a missing or
+out-of-range field returns `422`.
 
-Health check endpoint. Returns `200 OK` when the service is running and the model is loaded.
+Metrics exposed on `/metrics` (used by
+`monitoring/grafana-dashboards/rca-model-monitoring.json`):
+`rca_inference_requests_total`, `rca_inference_duration_seconds`,
+`rca_model_errors_total`, `rca_predictions_total{root_cause}`,
+`rca_prediction_confidence`.
 
-```json
-{
-  "status": "healthy",
-  "model_version": "<mlflow-run-id-or-registered-version>"
-}
+## Configuration
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `MODEL_DIR` | `<repo>/ml/models` (`/models` in the image) | Folder with `rca_random_forest.joblib`, `label_encoder.joblib`, `feature_names.json` |
+| `ML_SRC_DIR` | `<repo>/ml/src` (`/app/ml/src` in the image) | Where `predict.py` is imported from |
+| `MODEL_VERSION` | `1` | Version string reported in `/health` and in each prediction |
+
+## Where the model comes from
+
+The model files are **not** in git (`ml/models/` is gitignored) and **not**
+in the image (`.dockerignore`). Produce them first with `python ml/src/train.py`
+(or get them from the ML owner), then provide them at runtime in `MODEL_DIR`.
+If the files are missing, the service refuses to start.
+
+Moving the model to S3 / the MLflow registry is planned (phase B2.2).
+
+## Run locally
+
+```bash
+# from the repository root, with the model in ml/models/
+pip install -r rca-api/requirements-dev.txt
+cd rca-api
+uvicorn main:app --port 8000        # http://localhost:8000/docs
+python -m pytest -v                 # 4 tests
 ```
 
-### `POST /predict`
+## Run with Docker
 
-Accept a metric snapshot and return a root-cause prediction.
-
-**Request body (JSON):**
-
-```json
-{
-  "request_rate_rps": 42.5,
-  "error_rate_pct": 0.2,
-  "p99_latency_ms": 210.0,
-  "cpu_usage_pct": 35.0,
-  "memory_usage_mb": 512.0,
-  "pod_restart_count": 0
-}
+```bash
+# from the repository root
+docker build -f rca-api/Dockerfile -t rca-api .
+docker run -p 8000:8000 -v "$(pwd)/ml/models:/models:ro" rca-api
 ```
 
-**Response body (JSON):**
+## Deploy on Kubernetes (manual, for now)
 
-```json
-{
-  "predicted_label": "normal",
-  "probabilities": {
-    "normal": 0.87,
-    "database_slow": 0.05,
-    "payment_failure": 0.04,
-    "cpu_stress": 0.04
-  }
-}
+```bash
+kubectl create configmap rca-model -n ml-stack \
+  --from-file=ml/models/rca_random_forest.joblib \
+  --from-file=ml/models/label_encoder.joblib \
+  --from-file=ml/models/feature_names.json
+# replace REGISTRY in the image name with the ECR registry first
+kubectl apply -f kubernetes/ml-stack/rca-api/
 ```
 
-The `probabilities` field is included when the model supports `predict_proba` (e.g., Random Forest). If the model does not support probability output, only `predicted_label` will be returned.
-
----
-
-## Input / Feature Schema Compatibility
-
-The API input schema must exactly match the feature schema used during model training (see `ml/README.md`). If the feature schema changes, both the model and the API must be updated together and redeployed in coordination.
-
-The API will validate input using **Pydantic** (included with FastAPI). Any request that is missing required fields or contains out-of-range values will return `422 Unprocessable Entity`.
-
----
-
-## Model Loading Strategy
-
-At startup, the API will load the model from MLflow using the registered model name and stage:
-
-```python
-import mlflow.sklearn
-
-model = mlflow.sklearn.load_model("models:/<model-name>/Production")
-```
-
-The MLflow tracking URI is read from the `MLFLOW_TRACKING_URI` environment variable. The model name and stage may also be configurable via environment variables.
-
-The model artifact is loaded once at startup and held in memory for the lifetime of the process. The API does not support hot-reloading a new model version without a Pod restart.
-
----
-
-## Planned Subdirectory Structure
-
-The following structure will be created when implementation begins. It is **not created now** because no source files exist yet.
-
-```
-rca-api/
-├── Dockerfile
-├── main.py             ← FastAPI app, endpoint definitions
-├── model.py            ← Model loading and inference logic
-├── schemas.py          ← Pydantic input/output models
-└── requirements.txt    ← API-specific Python dependencies
-```
-
----
-
-## Current Implementation Status
-
-No source code, Dockerfile, or configuration files exist yet. Implementation begins in **Phase 10** of the project roadmap (see root `README.md`).
+Not yet wired into the GitOps flow (`kubernetes/base/` + ArgoCD on
+`feat/gitops`); that is the next step.
