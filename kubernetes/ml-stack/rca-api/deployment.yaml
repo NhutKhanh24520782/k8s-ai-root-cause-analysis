@@ -1,0 +1,87 @@
+# RCA API — FastAPI service that serves root-cause predictions.
+#
+# The trained model is NOT inside the image (see the root .dockerignore).
+# For now it is delivered as a ConfigMap built from the files that
+# ml/src/train.py writes to ml/models/. Create it before applying this file:
+#
+#   kubectl create configmap rca-model -n ml-stack \
+#     --from-file=ml/models/rca_random_forest.joblib \
+#     --from-file=ml/models/label_encoder.joblib \
+#     --from-file=ml/models/feature_names.json
+#
+# A ConfigMap holds at most 1 MiB, which fits the current model (about 0.4 MB).
+# If the team moves the model to S3 or MLflow, only the "volumes" block at the
+# bottom of this file has to change.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-api
+  namespace: ml-stack
+  labels:
+    app: rca-api
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: rca-api
+
+  template:
+    metadata:
+      labels:
+        app: rca-api
+
+    spec:
+      containers:
+        - name: rca-api
+          # Image is set at deploy time, same convention as the other services:
+          # the placeholder avoids hardcoding the AWS account ID or region.
+          image: REGISTRY/rca-api:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8000
+
+          env:
+            - name: MODEL_DIR
+              value: /models
+
+            - name: MODEL_VERSION
+              value: "1"
+
+          volumeMounts:
+            - name: model
+              mountPath: /models
+              readOnly: true
+
+          # The pod only receives traffic once /health answers, i.e. once the
+          # model has been loaded.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          # Restart the container if /health stops answering.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+      volumes:
+        - name: model
+          configMap:
+            name: rca-model
