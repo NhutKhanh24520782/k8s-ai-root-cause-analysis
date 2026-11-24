@@ -1,0 +1,13 @@
+# RCA API dependencies (Phước Thọ — MLOps / RCA API)
+
+# Web server
+fastapi
+uvicorn[standard]
+prometheus-client
+pydantic>=2.0.0
+
+# Needed to load and run the trained model (keep in sync with ml/requirements.txt)
+scikit-learn>=1.4.0
+pandas>=2.0.0
+numpy>=1.24.0
+joblib>=1.3.0
