@@ -122,13 +122,6 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Processing Tag Release: ${TAG}"
 
-      - name: Debug OIDC claims
-        run: |
-          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud, repository, ref, environment}'
-          echo "ROLE_ARN=${{ secrets.AWS_ROLE_ARN }}" | sed 's/[0-9]\{12\}/<acct>/'
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -169,7 +162,7 @@ jobs:
           ### ✅ Image Pushed to ECR
           | Service | Tag | Registry | Digest |
           |---|---|---|---|
-          | \`${{ matrix.service }}\` | \`${TAG}\`, \`latest\` | \`${REGISTRY}\` | \`${{ steps.push.outputs.digest }}\` |
+          | \`${{ matrix.service }}\` | \`${TAG}\` | \`${REGISTRY}\` | \`${{ steps.push.outputs.digest }}\` |
           EOF
 
   # ─────────────────────────────────────────────────────────────────────────────
