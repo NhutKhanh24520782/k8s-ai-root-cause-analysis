@@ -236,7 +236,7 @@ ai-root-cause-analysis/
 
 ## Implementation Roadmap
 
-### Phase 1 — Repository Initialisation ✅ *(current phase)*
+### Phase 1 — Repository Initialisation
 - Create the project skeleton, directory structure, and README files.
 - Establish `.gitignore`, `.dockerignore`, and `.env.example`.
 - Document the S3 remote-state design and Terraform workflow.
@@ -350,7 +350,7 @@ Running the MVP incurs AWS charges. The main cost drivers are:
 | Dedicated PostgreSQL Databases | ✅ Deployed |
 | ArgoCD GitOps Engine (App-of-Apps) | ✅ Deployed & Active |
 | GitHub Actions CI/CD (SemVer Tag & CD Approve) | ✅ Deployed & Active |
-| Prometheus / Grafana setup | ⏳ In progress |
+| Prometheus / Grafana setup | ✅ implemented |
 | Incident generation scripts | ⏳ Not started |
 | ML training pipeline | ⏳ Not started |
 | MLflow integration | ⏳ Not started |
