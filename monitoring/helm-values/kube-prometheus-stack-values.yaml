@@ -4,6 +4,15 @@
 grafana:
   enabled: true
   adminUser: admin
+  persistence:
+    type: pvc
+    enabled: true
+    storageClassName: gp2
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    finalizers:
+      - kubernetes.io/pvc-protection
 
 # Prometheus
 prometheus:

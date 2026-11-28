@@ -1,213 +1,297 @@
-# Full Deployment Flow — Sau Terraform Apply
+# End-to-End Deployment & CI/CD GitOps Guide
 
-## Kiến trúc tổng quan
+Tài liệu hướng dẫn toàn diện quy trình khởi tạo và vận hành hệ thống từ hạ tầng **Terraform**, quy trình **CI/CD bằng GitHub Actions** đến triển khai tự động **GitOps qua ArgoCD** trên Amazon EKS.
+
+---
+
+## 1. Kiến trúc luồng triển khai (GitOps Flow)
 
 ```
-Terraform Apply
-    ↓
-EKS Cluster + ECR Repos + VPC
-    ↓
-kubectl config → Namespaces → Secrets
-    ↓
-Docker Build → ECR Push
-    ↓
-PostgreSQL (StatefulSet) → Microservices → kube-prometheus-stack
-    ↓
-Smoke Tests
+[ Terraform Apply ]
+        ↓
+[ AWS EKS Cluster + ECR + VPC ]
+        ↓
+[ Cấu hình kubectl → Tạo Namespaces → Tạo DB Secrets ]
+        ↓
+[ Deploy PostgreSQL StatefulSets (order-db, payment-db) ]
+        ↓
+[ Cài đặt ArgoCD GitOps Controller & App-of-Apps ]
+        ↓
+[ Developer: Push Git Tag v*.*.* ] ──→ [ GitHub Actions CI: Build & Push ECR ]
+                                                        ↓
+[ GitHub Actions CD (cd-approve.yml) ] ←── [ Phê duyệt Release (Target Env & Tag) ]
+        ↓ (Cập nhật newTag trong kubernetes/overlays/<env>/kustomization.yaml)
+[ Push commit lên Git ]
+        ↓ (Tự động đồng bộ hóa)
+[ ArgoCD tự động Reconcile & Rollout Deployment mới trên EKS ]
 ```
 
 ---
 
-## Cách 1 — Chạy script tự động (khuyến nghị)
+## 2. Quy trình triển khai chi tiết từng bước
 
-```bash
-# Từ thư mục d:\mlops
-bash scripts/deploy.sh
-```
+### Bước 1 — Khởi tạo hạ tầng AWS bằng Terraform
 
-Script sẽ tự làm toàn bộ 8 bước bên dưới.
+1. **Khởi tạo S3 Remote State & DynamoDB Lock** (nếu chưa có):
+   ```bash
+   cd terraform/bootstrap
+   terraform init
+   terraform apply -auto-approve
+   cd ../
+   ```
+
+2. **Provision VPC, EKS Cluster, ECR & IAM Roles**:
+   ```bash
+   terraform init
+   terraform plan -out=tfplan
+   terraform apply tfplan
+   ```
 
 ---
 
-## Cách 2 — Chạy thủ công từng bước
+### Bước 2 — Cấu hình `kubectl` & EBS CSI Driver
 
-### Bước 1 — Cấu hình kubectl
+1. **Cập nhật kubeconfig local**:
+   ```bash
+   aws eks update-kubeconfig --region ap-southeast-1 --name ai-rca-dev-cluster
+
+   # Kiểm tra các node đã ở trạng thái Ready
+   kubectl get nodes
+   ```
+
+2. **Cài đặt AWS EBS CSI Driver Add-on** (cần thiết cho PVC của database):
+   ```bash
+   aws eks create-addon \
+     --cluster-name ai-rca-dev-cluster \
+     --addon-name aws-ebs-csi-driver \
+     --region ap-southeast-1
+
+   # Kiểm tra StorageClass
+   kubectl get sc
+   ```
+
+---
+
+### Bước 3 — Tạo Namespaces & Secrets (Bắt buộc trước khi chạy App)
+
+> ⚠️ **Lưu ý quan trọng về Secret trong GitOps:**  
+> Mật khẩu và thông tin đăng nhập database **không được commit lên Git**. Do đó, bạn phải tạo Secret trực tiếp trên cluster một lần lúc bootstrap hoặc thông qua Secret Manager.
+
+1. **Tạo Namespaces**:
+   ```bash
+   kubectl apply -f kubernetes/base/namespaces.yaml
+   # Kiểm tra:
+   kubectl get namespaces | grep -E "microservices|monitoring|ml-stack"
+   ```
+
+2. **Tạo Secrets cho Database & Microservices**:
+   ```bash
+   # Secret cho Order Service & Order DB
+   kubectl create secret generic order-db-secret \
+     --namespace microservices \
+     --from-literal=POSTGRES_HOST=order-db \
+     --from-literal=POSTGRES_PORT=5432 \
+     --from-literal=POSTGRES_DB=orders_db \
+     --from-literal=POSTGRES_USER=order_user \
+     --from-literal=POSTGRES_PASSWORD=order_password_123
+
+   # Secret cho Payment Service & Payment DB
+   kubectl create secret generic payment-db-secret \
+     --namespace microservices \
+     --from-literal=POSTGRES_HOST=payment-db \
+     --from-literal=POSTGRES_PORT=5432 \
+     --from-literal=POSTGRES_DB=payment_db \
+     --from-literal=POSTGRES_USER=payment_user \
+     --from-literal=POSTGRES_PASSWORD=payment_password_123
+
+   # Kiểm tra lại Secret:
+   kubectl get secrets -n microservices
+   ```
+
+---
+
+### Bước 4 — Triển khai PostgreSQL StatefulSets
+
+Microservices phụ thuộc vào database để vượt qua kiểm tra Readiness Probe (`/health`). Hãy deploy database trước:
+
 ```bash
-aws eks update-kubeconfig --region ap-southeast-1 --name ai-rca-dev-cluster
-
-# Kiểm tra node đã Ready
-kubectl get nodes
-```
-
-### Bước 2 — Tạo Namespaces
-```bash
-kubectl apply -f kubernetes/namespaces/namespaces.yaml
-
-# Verify
-kubectl get namespaces | grep -E "microservices|monitoring|ml-stack"
-```
-
-### Bước 3 — Tạo Kubernetes Secrets (bắt buộc trước khi deploy)
-```bash
-kubectl create secret generic order-db-secret \
-  --namespace microservices \
-  --from-literal=POSTGRES_DB=orders_db \
-  --from-literal=POSTGRES_USER=order_user \
-  --from-literal=POSTGRES_PASSWORD=YOUR_STRONG_PASSWORD
-
-kubectl create secret generic payment-db-secret \
-  --namespace microservices \
-  --from-literal=POSTGRES_DB=payment_db \
-  --from-literal=POSTGRES_USER=payment_user \
-  --from-literal=POSTGRES_PASSWORD=YOUR_STRONG_PASSWORD
-
-# Verify
-kubectl get secrets -n microservices
-```
-
-### Bước 4 — Build & Push Docker images lên ECR
-
-```bash
-# Lấy ECR registry URL từ terraform output
-ECR_REGISTRY=$(terraform -chdir=terraform output -json ecr_repository_urls \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print(list(d.values())[0].split('/')[0])")
-
-echo "ECR: $ECR_REGISTRY"
-# Ví dụ: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com
-
-# Login Docker vào ECR
-aws ecr get-login-password --region ap-southeast-1 \
-  | docker login --username AWS --password-stdin $ECR_REGISTRY
-
-# Build và push từng service
-for svc in api-gateway order-service payment-service; do
-  docker build -t $ECR_REGISTRY/$svc:1.0.0 microservices/services/$svc/
-  docker push $ECR_REGISTRY/$svc:1.0.0
-  echo "✅ Pushed $svc"
-done
-```
-
-### Bước 5 — Deploy PostgreSQL StatefulSets
-```bash
+# Triển khai Order DB & Payment DB
 kubectl apply -f kubernetes/postgres/order_db/
 kubectl apply -f kubernetes/postgres/payment_db/
 
-# Chờ DB ready (khoảng 1-2 phút)
-kubectl rollout status statefulset/order-db   -n microservices --timeout=120s
-kubectl rollout status statefulset/payment-db -n microservices --timeout=120s
+# Chờ cả 2 database đạt trạng thái Ready (khoảng 1-2 phút)
+kubectl wait --for=condition=ready pod/order-db-0 -n microservices --timeout=120s
+kubectl wait --for=condition=ready pod/payment-db-0 -n microservices --timeout=120s
 
-# Verify
-kubectl get pods -n microservices
+# Kiểm tra Pods & PVC:
+kubectl get statefulset,pvc,svc -n microservices
 ```
 
-### Bước 6 — Deploy Microservices
+---
 
-```bash
-# Thay placeholder ${ECR_REGISTRY} rồi apply
-for svc in api-gateway order-service payment-service; do
-  sed "s|\${ECR_REGISTRY}|${ECR_REGISTRY}|g" \
-    kubernetes/microservices/$svc/deployment.yaml | kubectl apply -f -
+### Bước 5 — Cài đặt và cấu hình ArgoCD (GitOps Engine)
 
-  kubectl apply -f kubernetes/microservices/$svc/service.yaml
-done
+1. **Cài đặt ArgoCD vào EKS Cluster**:
+   ```bash
+   kubectl create namespace argocd
+   kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
-# Chờ tất cả pods Ready
-kubectl rollout status deployment/api-gateway     -n microservices --timeout=180s
-kubectl rollout status deployment/order-service   -n microservices --timeout=180s
-kubectl rollout status deployment/payment-service -n microservices --timeout=180s
+   # Chờ các pod ArgoCD sẵn sàng:
+   kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=180s
+   ```
 
-# Verify
-kubectl get pods -n microservices
-kubectl get services -n microservices
-```
+2. **Lấy mật khẩu đăng nhập ArgoCD UI**:
+   - Trên Linux / macOS / Git Bash:
+     ```bash
+     kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode
+     ```
+   - Trên Windows PowerShell:
+     ```powershell
+     kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | %{ [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+     ```
 
-### Bước 7 — Cài kube-prometheus-stack
+3. **Mở giao diện ArgoCD UI**:
+   ```bash
+   kubectl port-forward svc/argocd-server -n argocd 8080:443
+   # Truy cập: https://localhost:8080 (User: admin)
+   ```
+
+4. **Triển khai ArgoCD Application**:
+   ```bash
+   # Triển khai môi trường dev (trỏ vào kubernetes/overlays/dev)
+   kubectl apply -f argocd/apps/microservices-dev.yaml
+
+   # (Tùy chọn) Hoặc triển khai toàn bộ qua App-of-Apps:
+   # kubectl apply -f argocd/apps/app-of-apps.yaml
+   ```
+
+---
+
+### Bước 6 — Quy trình CI: Đóng gói & Đẩy Image lên ECR
+
+Khi có thay đổi code và sẵn sàng release:
+
+1. **Tạo và đẩy Git Tag định dạng SemVer (`v*.*.*`)**:
+   ```bash
+   # Ví dụ release v1.0.12
+   git tag v1.0.12
+   git push origin v1.0.12
+   ```
+
+2. **GitHub Actions (`ci.yml`) sẽ tự động**:
+   - Chạy Unit tests & linter.
+   - Build Docker images cho các services (`api-gateway`, `order-service`, `payment-service`).
+   - Đẩy images lên Amazon ECR với tag chính xác `v1.0.12`.
+   - Tạo GitHub Release tự động.
+
+---
+
+### Bước 7 — Quy trình CD: Phê duyệt & Cập nhật Kustomize Overlay
+
+Để đưa phiên bản mới vào môi trường cụ thể (`dev`, `staging`, hoặc `prod`):
+
+1. Vào GitHub Repository $\rightarrow$ chọn tab **Actions**.
+2. Chọn workflow **CD Release Approval & Promote** (`cd-approve.yml`).
+3. Nhấp vào **Run workflow**:
+   - **Target Environment**: chọn `dev` (hoặc `staging`, `prod`).
+   - **Release Image Tag**: nhập `v1.0.12` (bắt buộc đúng định dạng `v*.*.*`).
+4. **Workflow sẽ tự động thực hiện**:
+   - Kiểm tra tag `v1.0.12` đã tồn tại trên Amazon ECR chưa.
+   - Cập nhật trường `newTag: v1.0.12` trong file [kubernetes/overlays/dev/kustomization.yaml](file:///d:/new-devops/k8s-ai-root-cause-analysis/kubernetes/overlays/dev/kustomization.yaml).
+   - Chạy `kubectl kustomize` kiểm tra tính hợp lệ.
+   - Tự động tạo commit và push lên Git với `[skip ci]`.
+
+---
+
+### Bước 8 — ArgoCD Tự động Đồng bộ (Reconcile) & Kiểm tra
+
+1. ArgoCD tự động phát hiện commit mới trên Git.
+2. ArgoCD tiến hành Rolling Update các Deployment tương ứng với tag mới.
+3. Kiểm tra trạng thái Pods trong cluster:
+   ```bash
+   kubectl get pods -n microservices -w
+   ```
+4. Khi quá trình hoàn tất:
+   - Các pods `api-gateway`, `order-service`, `payment-service` đều ở trạng thái `Running (1/1)`.
+   - Trên ArgoCD UI: Ứng dụng báo **Synced** và **Healthy**.
+
+---
+
+### Bước 9 — Cài đặt Monitoring (Prometheus & Grafana)
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
-# Phải chạy từ d:\mlops
 helm upgrade --install kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
   --namespace monitoring --create-namespace \
   --values monitoring/helm-values/kube-prometheus-stack-values.yaml \
   --wait --timeout 5m
 
-# Chờ pods (khoảng 3-5 phút)
-kubectl get pods -n monitoring -w
-```
-
-### Bước 8 — Kiểm tra toàn bộ
-
-```bash
-# Test microservices
-KUBECONFIG=~/.kube/config bash kubernetes/test.sh
-
-# Test monitoring
-bash monitoring/test_monitoring.sh
-```
-
----
-
-## Vì sao monitoring test đang FAIL?
-
-Các pods mới được cài, cần **3-5 phút** để khởi động. Chạy lại sau:
-
-```bash
-# Xem trạng thái pods
+# Kiểm tra pods monitoring:
 kubectl get pods -n monitoring
-
-# Khi thấy tất cả Running/Ready thì chạy lại test
-bash monitoring/test_monitoring.sh
-```
-
-Lý do khác có thể: Script test tìm pod theo label `app.kubernetes.io/name=prometheus` nhưng kube-prometheus-stack dùng label khác. Kiểm tra:
-```bash
-kubectl get pods -n monitoring --show-labels
 ```
 
 ---
 
-## Truy cập sau khi deploy
+## 3. Xử lý sự cố thường gặp (Troubleshooting)
 
-### API Gateway (test requests)
+### Lỗi 1: `CreateContainerConfigError: secret "order-db-secret" not found`
+- **Nguyên nhân**: Pod `order-service` cần các biến môi trường từ `order-db-secret` nhưng Secret này chưa được tạo trong namespace `microservices`.
+- **Khắc phục**: Chạy lệnh tạo Secret ở **Bước 3.2**. Pod sẽ tự động nhận Secret và chuyển sang trạng thái `Running`.
+
+### Lỗi 2: `Readiness probe failed: connect: connection refused (port 8001 / 8002)`
+- **Nguyên nhân**: `order-service` hoặc `payment-service` không thể kết nối tới cơ sở dữ liệu `order-db` hoặc `payment-db` qua DNS nội bộ `5432`.
+- **Khắc phục**: Kiểm tra database đã chạy chưa:
+  ```bash
+  kubectl get pods -n microservices | grep db
+  ```
+  Nếu chưa, chạy lại lệnh apply database ở **Bước 4**.
+
+### Lỗi 3: `ImagePullBackOff` hoặc `ErrImagePull`
+- **Nguyên nhân**:
+  - Image tag trong Kustomize overlay không tồn tại trên Amazon ECR.
+  - Node group của EKS thiếu quyền IAM `AmazonEC2ContainerRegistryReadOnly` để pull image từ ECR.
+- **Khắc phục**:
+  - Kiểm tra các image tags trên ECR:
+    ```bash
+    aws ecr describe-images --repository-name order-service --region ap-southeast-1
+    ```
+  - Kiểm tra xem đã kích hoạt workflow CI cho tag đó chưa (Bước 6).
+
+---
+
+## 4. Kiểm thử hệ thống sau khi triển khai (Smoke Tests)
+
 ```bash
+# 1. Port-forward API Gateway
 kubectl port-forward -n microservices svc/api-gateway 8000:8000
+
+# 2. Kiểm tra Health Check
 curl http://localhost:8000/health
+
+# 3. Tạo đơn hàng mẫu
 curl -X POST http://localhost:8000/orders \
   -H "Content-Type: application/json" \
-  -d '{"item_name":"Laptop","quantity":1}'
-```
+  -d '{"item_name":"Laptop Gaming","quantity":1}'
 
-### Prometheus UI
-```bash
-kubectl port-forward -n monitoring \
-  svc/kube-prometheus-stack-prometheus 9090:9090
-# → http://localhost:9090
-```
-
-### Grafana
-```bash
-kubectl port-forward -n monitoring \
-  svc/kube-prometheus-stack-grafana 3000:80
-# → http://localhost:3000  (user: admin)
-
-# Lấy password
-kubectl get secret -n monitoring kube-prometheus-stack-grafana \
-  -o jsonpath="{.data.admin-password}" | base64 --decode
+# 4. Kiểm tra danh sách đơn hàng
+curl http://localhost:8000/orders
 ```
 
 ---
 
-## Xóa toàn bộ resources (khi không dùng nữa)
+## 5. Dọn dẹp tài nguyên (Teardown)
+
+Khi không sử dụng, hủy tài nguyên AWS để tránh phát sinh chi phí duy trì:
 
 ```bash
-# Xóa k8s resources
-kubectl delete namespace microservices monitoring ml-stack
+# 1. Xóa các applications và namespaces trên K8s
+kubectl delete -f argocd/apps/microservices-dev.yaml --ignore-not-found
+kubectl delete namespace microservices monitoring ml-stack argocd --ignore-not-found
 
-# Xóa AWS resources (tính phí)
-terraform -chdir=terraform destroy
+# 2. Hủy toàn bộ hạ tầng AWS qua Terraform
+cd terraform
+terraform destroy -auto-approve
 ```
-
-> ⚠️ **Chi phí:** EKS cluster + NAT Gateway + EC2 nodes tốn ~$5–10/ngày. Nhớ `terraform destroy` sau khi test xong!
