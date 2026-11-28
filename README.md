@@ -1,7 +1,7 @@
 # AI-Powered Root Cause Analysis for Kubernetes Microservices
 
-> **Status:** Repository skeleton and documentation only.  
-> No application code, infrastructure, or ML models have been implemented yet.
+> **Status:** Active GitOps implementation.  
+> Microservices, Amazon EKS infrastructure, GitHub Actions CI/CD, and ArgoCD deployment are implemented.
 
 ---
 
@@ -23,7 +23,7 @@
 
 ## Overview
 
-This project builds a **Machine Learning system** that automatically identifies the likely root cause of incidents in a Kubernetes-based microservices application running on AWS EKS. It combines real-time observability (Prometheus and Grafana), controlled incident generation, supervised ML classification (scikit-learn / MLflow), and a REST prediction API (FastAPI) into an end-to-end MLOps pipeline driven by Jenkins.
+This project builds a **Machine Learning system** that automatically identifies the likely root cause of incidents in a Kubernetes-based microservices application running on AWS EKS. It combines real-time observability (Prometheus and Grafana), controlled incident generation, supervised ML classification (scikit-learn / MLflow), and a REST prediction API (FastAPI) into an end-to-end GitOps pipeline driven by **GitHub Actions** and **ArgoCD**.
 
 The system is designed and implemented by a four-person university project team.
 
@@ -45,7 +45,7 @@ This project addresses that problem by training a classifier on labeled observab
 4. Train a Random Forest classifier to distinguish between incident root-cause categories.
 5. Track experiments and model artifacts with MLflow.
 6. Expose predictions through a FastAPI endpoint (`POST /predict`).
-7. Automate the build, test, and deployment pipeline with Jenkins.
+7. Automate the build, test, and deployment pipeline using a modern GitOps workflow with GitHub Actions and ArgoCD.
 
 The MVP does **not** include: distributed tracing, log aggregation (Loki), chaos engineering frameworks, auto-remediation, or production-grade multi-environment Terraform.
 
@@ -53,67 +53,102 @@ The MVP does **not** include: distributed tracing, log aggregation (Loki), chaos
 
 ## Architecture
 
-The diagram below describes the **intended** architecture. Components shown are planned for implementation; none are currently running.
+The system uses a **GitOps-driven continuous integration and deployment architecture** powered by **GitHub Actions** and **ArgoCD**, running on **Amazon EKS** in `ap-southeast-1`.
 
 ```mermaid
 graph TD
-    subgraph Developer["Developer Workstation"]
-        GIT["Git / GitHub"]
-        JENKINS_TRIGGER["Jenkins Trigger"]
+    subgraph Developer["Developer / Operator"]
+        DEV["Developer"]
+        GIT["GitHub Repository\n(Manifests & Code)"]
     end
 
-    subgraph CI_CD["CI/CD — Jenkins"]
-        PIPELINE["Pipeline\n(checkout → test → build → push → deploy → smoke)"]
+    subgraph Actions["GitHub Actions CI/CD"]
+        CI["CI Workflow (ci.yml)\n• Triggered by SemVer tag (v*.*.*)\n• Build & test microservices\n• Push images to Amazon ECR\n• Create GitHub Release"]
+        CD_APPROVE["CD Workflow (cd-approve.yml)\n• Manual Dispatch Promotion\n• Validate SemVer tag in ECR\n• Update Kustomize Overlay Tag\n• Commit & push to Git [skip ci]"]
     end
 
-    subgraph AWS["AWS (ap-southeast-1)"]
-        subgraph VPC["VPC"]
-            subgraph Public["Public Subnets (AZ-a, AZ-b)"]
-                ALB["AWS Load Balancer\n(Ingress)"]
-                NAT["NAT Gateway"]
+    subgraph AWS["AWS Cloud (ap-southeast-1)"]
+        ECR["Amazon ECR\n(api-gateway, order-service,\npayment-service, rca-api)"]
+
+        subgraph EKS["Amazon EKS Cluster"]
+            subgraph GitOps["GitOps Controller"]
+                ARGOCD["ArgoCD Controller\n(App-of-Apps)\n• microservices-dev\n• microservices-staging\n• microservices-prod"]
             end
-            subgraph Private["Private Subnets (AZ-a, AZ-b)"]
-                subgraph EKS["Amazon EKS Cluster"]
-                    subgraph Services["Microservices"]
-                        GW["API Gateway\nService"]
-                        ORDER["Order\nService"]
-                        PAYMENT["Payment\nService"]
-                    end
-                    subgraph Observability["Observability"]
-                        PROM["Prometheus"]
-                        GRAFANA["Grafana"]
-                    end
-                    subgraph ML_Stack["ML Stack"]
-                        MLFLOW["MLflow\nTracking Server"]
-                        RCA["RCA API\n(FastAPI)"]
-                    end
-                end
+
+            subgraph Workloads["Namespace: microservices"]
+                GW["API Gateway"]
+                ORDER["Order Service"]
+                PAYMENT["Payment Service"]
+                ORDER_DB[("PostgreSQL\norder-db")]
+                PAYMENT_DB[("PostgreSQL\npayment-db")]
+            end
+
+            subgraph Observability["Observability"]
+                PROM["Prometheus"]
+                GRAFANA["Grafana"]
+            end
+
+            subgraph ML_Stack["Namespace: ml-stack"]
+                RCA["RCA API (FastAPI)"]
+                MLFLOW["MLflow Tracking"]
             end
         end
-        ECR["Amazon ECR\n(Container Registry)"]
-        S3_STATE["Amazon S3\n(Terraform State)"]
+
         S3_DATA["Amazon S3\n(ML Datasets / Artifacts)"]
     end
 
-    GIT -->|push| CI_CD
-    JENKINS_TRIGGER --> CI_CD
-    PIPELINE -->|docker push| ECR
-    PIPELINE -->|kubectl apply| EKS
-    ECR -->|image pull| EKS
+    DEV -->|push tag v*.*.*| GIT
+    GIT -->|trigger| CI
+    CI -->|docker push v1.0.x| ECR
+    DEV -->|workflow_dispatch promotion| CD_APPROVE
+    CD_APPROVE -->|verify image tag| ECR
+    CD_APPROVE -->|git commit newTag| GIT
+
+    GIT -->|poll / webhook desired state| ARGOCD
+    ARGOCD -->|reconcile & apply| Workloads
+    ARGOCD -->|reconcile & apply| ML_Stack
+    Workloads -->|pull image| ECR
 
     GW --> ORDER
     GW --> PAYMENT
+    ORDER --> ORDER_DB
+    PAYMENT --> PAYMENT_DB
     ORDER --> PROM
     PAYMENT --> PROM
     GW --> PROM
     PROM --> GRAFANA
     PROM -->|metric snapshots| S3_DATA
     S3_DATA -->|training data| RCA
-    MLFLOW --> S3_DATA
     RCA --> MLFLOW
-    ALB --> GW
-    ALB --> RCA
 ```
+
+### GitOps Workflow Overview
+
+The architecture enforces strict separation between code integration, configuration promotion, and runtime synchronization:
+
+1. **Continuous Integration (GitHub Actions `ci.yml`)**:
+   - **Trigger**: Git tag creation matching SemVer format `v*.*.*` (e.g. `v1.0.6`).
+   - **Build & Push**: Builds Docker images for `api-gateway`, `order-service`, and `payment-service`. Tags each image with the exact release tag and pushes them to Amazon ECR.
+   - **Release**: Automatically publishes a GitHub Release with release notes and immutable image references.
+
+2. **Continuous Delivery & Promotion (`cd-approve.yml`)**:
+   - **Trigger**: Manual `workflow_dispatch` by an authorized team member specifying target environment (`dev`, `staging`, `prod`) and `image_tag` (e.g. `v1.0.6`).
+   - **Verification**: Validates SemVer formatting and verifies that the image tags actually exist in Amazon ECR via AWS CLI before touching manifests.
+   - **Manifest Update**: Modifies the Kustomize overlay (`kubernetes/overlays/<env>/kustomization.yaml`) by updating the `newTag` fields.
+   - **Git Commit**: Commits and pushes the manifest change back to GitHub with `[skip ci]`. Git remains the single source of truth for the cluster state.
+
+3. **Continuous Deployment via ArgoCD (Pull-based GitOps)**:
+   - **Deployment Model**: ArgoCD runs inside the EKS cluster (`argocd` namespace) and continuously compares cluster state against desired state in Git.
+   - **App-of-Apps Pattern**: An overarching root application (`argocd/apps/app-of-apps.yaml`) generates environment-specific ArgoCD Applications (`microservices-dev`, `microservices-staging`, `microservices-prod`).
+   - **Self-Healing & Pruning**: Automated drift detection instantly reconciles any unauthorized out-of-band changes (`selfHeal: true`, `prune: true`).
+   - **Sync Waves**: `kubernetes/base/namespaces.yaml` uses `argocd.argoproj.io/sync-wave: "-1"` to guarantee namespaces (`microservices`, `ml-stack`) exist before workloads are deployed.
+
+4. **Kustomize Base vs. Overlays Architecture**:
+   - `kubernetes/base/`: Contains clean, environment-agnostic resource definitions (Deployments, Services, ConfigMaps, Namespaces). It defines *what* runs.
+   - `kubernetes/overlays/<env>/`: Customizes *how* it runs in each target environment without duplicating YAML code:
+     - `dev`: Replicas = 1, tracking active release tags.
+     - `staging` / `prod`: Replicas = 2+, strict resource quotas, production config.
+   - *Note on Legacy Directory:* The older `kubernetes/microservices/` directory contained static, non-templated manifests. It has been replaced by the structured Kustomize `base/` and `overlays/` pattern.
 
 ---
 
@@ -122,12 +157,16 @@ graph TD
 | Directory | Technology | Responsibility |
 |-----------|-----------|----------------|
 | `services/` | Python / Docker | Microservice source code (API Gateway, Order Service, Payment Service) |
+| `.github/workflows/` | GitHub Actions | CI build/push on tags (`ci.yml`) and manual GitOps promotion (`cd-approve.yml`) |
+| `argocd/` | ArgoCD | GitOps App-of-Apps and environment application declarations (`apps/`, `install/`) |
+| `kubernetes/base/` | Kustomize / K8s | Shared environment-agnostic Kubernetes manifests (Deployments, Services, Namespaces) |
+| `kubernetes/overlays/` | Kustomize / K8s | Environment-specific overlays (`dev/`, `staging/`, `prod/`) with image tags and replicas |
+| `kubernetes/postgres/` | StatefulSet / PVC | Dedicated PostgreSQL database manifests for `order-db` and `payment-db` |
 | `terraform/` | Terraform / AWS | Infrastructure as Code: VPC, EKS, ECR, IAM, S3 |
-| `kubernetes/` | Kubernetes YAML | Application manifests: Deployments, Services, Ingress, ConfigMaps |
 | `monitoring/` | Prometheus, Grafana, Helm | Metrics collection and visualisation |
 | `ml/` | Python, scikit-learn, MLflow | Dataset preparation, model training, evaluation, experiment tracking |
 | `rca-api/` | FastAPI, Docker | REST API serving RCA predictions |
-| `jenkins/` | Jenkins | CI/CD pipeline automation |
+| `jenkins/` | Jenkins | Legacy CI/CD pipeline documentation (superseded by GitHub Actions + ArgoCD) |
 | `scripts/` | Bash / Python | Operational scripts: incident generation, metric collection, health checks |
 | `docs/` | Markdown | Architecture documentation, dataset schema, evaluation results |
 
@@ -141,27 +180,36 @@ ai-root-cause-analysis/
 ├── .gitignore
 ├── .dockerignore
 ├── .env.example
-├── services/
-│   └── README.md               ← Microservice source code (not yet implemented)
-├── terraform/
-│   └── README.md               ← AWS infrastructure and remote-state documentation
+├── .github/
+│   └── workflows/
+│       ├── ci.yml              ← Tag-triggered CI (build & push to ECR, GitHub release)
+│       ├── cd-approve.yml      ← Manual approval CD (updates Kustomize overlays)
+│       └── cicd.yml.legacy     ← Legacy monolithic pipeline
+├── argocd/
+│   ├── README.md               ← ArgoCD installation and setup guide
+│   ├── install/                ← Namespace and core ArgoCD install manifests
+│   └── apps/
+│       ├── app-of-apps.yaml    ← Root application managing all environments
+│       ├── microservices-dev.yaml
+│       ├── microservices-staging.yaml
+│       └── microservices-prod.yaml
+├── services/                   ← Microservice source code (API Gateway, Order, Payment)
 ├── kubernetes/
-│   └── README.md               ← Kubernetes manifests (not yet implemented)
-├── monitoring/
-│   └── README.md               ← Prometheus and Grafana setup documentation
-├── ml/
-│   └── README.md               ← ML pipeline documentation
-├── rca-api/
-│   └── README.md               ← FastAPI RCA prediction service documentation
-├── jenkins/
-│   └── README.md               ← CI/CD pipeline documentation
-├── scripts/
-│   └── README.md               ← Operational and experiment scripts documentation
-└── docs/
-    └── README.md               ← Architecture and methodology documentation
+│   ├── base/                   ← Kustomize base manifests (Deployments, Services, Namespaces)
+│   ├── overlays/               ← Kustomize environment overlays
+│   │   ├── dev/                ← Dev environment overlay (active release tags)
+│   │   ├── staging/            ← Staging environment overlay
+│   │   └── prod/               ← Production environment overlay
+│   ├── postgres/               ← Dedicated PostgreSQL databases (order-db, payment-db)
+│   └── README.md               ← Kubernetes & Kustomize documentation
+├── terraform/                  ← AWS infrastructure (VPC, EKS, ECR, IAM, S3)
+├── monitoring/                 ← Prometheus and Grafana setup documentation
+├── ml/                         ← ML pipeline documentation and training scripts
+├── rca-api/                    ← FastAPI RCA prediction service documentation
+├── jenkins/                    ← Legacy CI/CD documentation
+├── scripts/                    ← Operational scripts (incident generation, verification)
+└── docs/                       ← Architecture and methodology documentation
 ```
-
-Future subdirectories will be added incrementally as implementation files are needed. Planned subdirectories that do not yet have content are documented in each directory's `README.md` rather than created as empty stubs.
 
 ---
 
@@ -173,11 +221,14 @@ Future subdirectories will be added incrementally as implementation files are ne
 | Infrastructure as Code | Terraform | ≥ 1.10 (for S3 native locking) |
 | Container runtime | Docker | Current stable |
 | Orchestration | Kubernetes | ≥ 1.29 (EKS managed) |
+| Manifest Management | Kustomize | Built into kubectl / ArgoCD |
+| GitOps CD | ArgoCD | ≥ 2.10 |
+| CI Pipeline & Automation | GitHub Actions | Current |
 | Observability | Prometheus, Grafana | Helm kube-prometheus-stack |
 | ML framework | scikit-learn | ≥ 1.4 |
 | Experiment tracking | MLflow | ≥ 2.x |
 | Prediction API | FastAPI | ≥ 0.111 |
-| CI/CD | Jenkins | LTS |
+| Databases | PostgreSQL | ≥ 15 (Alpine) |
 | Language | Python | ≥ 3.11 |
 | Version control | Git, GitHub | — |
 
@@ -200,13 +251,14 @@ Future subdirectories will be added incrementally as implementation files are ne
 - Author Terraform configuration for VPC, subnets, Internet Gateway, NAT Gateway, EKS cluster, managed node group, IAM roles, and ECR repositories.
 - Run `terraform plan` and review; run `terraform apply` after team sign-off.
 
-### Phase 4 — Build and Push Container Images
-- Write Dockerfiles for each microservice and the RCA API.
-- Configure Jenkins to build images and push them to ECR.
+### Phase 4 — Build and Push Container Images (CI)
+- Write Dockerfiles for each microservice (`api-gateway`, `order-service`, `payment-service`, `rca-api`).
+- Configure GitHub Actions CI (`ci.yml`) to automatically build and push SemVer-tagged images (`v*.*.*`) to Amazon ECR.
 
-### Phase 5 — Deploy Microservices to EKS
-- Author Kubernetes manifests for all services.
-- Apply manifests and verify Pod health, readiness, and Service connectivity.
+### Phase 5 — Deploy Microservices to EKS via GitOps (CD)
+- Author Kustomize base manifests (`kubernetes/base/`) and environment overlays (`kubernetes/overlays/dev`, `staging`, `prod`).
+- Deploy PostgreSQL stateful workloads for Order and Payment services.
+- Configure ArgoCD App-of-Apps for automated, declarative GitOps deployments.
 
 ### Phase 6 — Install Prometheus and Grafana
 - Deploy `kube-prometheus-stack` via Helm.
@@ -231,9 +283,10 @@ Future subdirectories will be added incrementally as implementation files are ne
 - Package as a Docker image, push to ECR, and deploy to EKS.
 - Load the registered MLflow model artifact at startup.
 
-### Phase 11 — Integrate Jenkins CI/CD
-- Write a `Jenkinsfile` for each service covering: checkout → test → build → push → deploy → smoke test.
-- Store all credentials in Jenkins Credentials; do not hardcode them.
+### Phase 11 — GitOps Release Promotion & CD Approval
+- Implement `cd-approve.yml` manual promotion workflow.
+- Validate release image tags against ECR using AWS credentials / OIDC.
+- Automatically update Kustomize overlays and sync changes via ArgoCD self-healing.
 
 ### Phase 12 — End-to-End Evaluation
 - Run a full incident scenario and verify that the RCA API returns the correct root-cause class.
@@ -291,15 +344,17 @@ Running the MVP incurs AWS charges. The main cost drivers are:
 |-----------|--------|
 | Repository skeleton and documentation | ✅ Complete |
 | S3 remote-state design | ✅ Documented |
-| AWS infrastructure (Terraform) | ⏳ Not started |
-| Microservice source code | ⏳ Not started |
-| Kubernetes manifests | ⏳ Not started |
-| Prometheus / Grafana setup | ⏳ Not started |
+| AWS infrastructure (Terraform VPC, EKS, ECR) | ✅ Provisioned |
+| Microservice source code (Gateway, Order, Payment) | ✅ Complete |
+| Kubernetes Kustomize Base & Overlays | ✅ Implemented |
+| Dedicated PostgreSQL Databases | ✅ Deployed |
+| ArgoCD GitOps Engine (App-of-Apps) | ✅ Deployed & Active |
+| GitHub Actions CI/CD (SemVer Tag & CD Approve) | ✅ Deployed & Active |
+| Prometheus / Grafana setup | ⏳ In progress |
 | Incident generation scripts | ⏳ Not started |
 | ML training pipeline | ⏳ Not started |
 | MLflow integration | ⏳ Not started |
-| RCA API | ⏳ Not started |
-| Jenkins CI/CD | ⏳ Not started |
+| RCA API (FastAPI) | ⏳ Staged for ML integration |
 
 ---
 
