@@ -8,13 +8,13 @@ resources:
 images:
   - name: api-gateway
     newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/api-gateway
-    newTag: vx.y.z
+    newTag: v1.0.13
   - name: order-service
     newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/order-service
-    newTag: vx.y.z
+    newTag: v1.0.13
   - name: payment-service
     newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/payment-service
-    newTag: vx.y.z
+    newTag: v1.0.13
   # - name: rca-api
   #   newName: 274118253913.dkr.ecr.ap-southeast-1.amazonaws.com/rca-api
   #   newTag: latest
