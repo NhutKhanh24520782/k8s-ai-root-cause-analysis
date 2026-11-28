@@ -63,8 +63,8 @@ jobs:
 
       - name: Verify target branch
         run: |
-          if [ "$GITHUB_REF_NAME" != "feat/gitops" ]; then
-            echo "::error::Only feat/gitops is allowed during testing."
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::Only main is allowed during testing."
             exit 1
           fi
 
